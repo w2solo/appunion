@@ -1,0 +1,32 @@
+{
+  "name": "@appunions/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "tsx --test src/rules.test.ts"
+  },
+  "dependencies": {
+    "@appunions/db": "workspace:*",
+    "@appunions/shared": "workspace:*",
+    "@aws-sdk/client-s3": "^3.712.0",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/multipart": "^9.0.3",
+    "bcryptjs": "^2.4.3",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.38.3",
+    "fastify": "^5.2.0",
+    "ioredis": "^5.4.2",
+    "jose": "^5.9.6",
+    "postgres": "^3.4.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

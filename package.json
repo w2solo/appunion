@@ -1,0 +1,14 @@
+{
+  "name": "appunions",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @appunions/api --filter @appunions/web --filter @appunions/worker dev",
+    "dev:api": "pnpm --filter @appunions/api dev",
+    "dev:web": "pnpm --filter @appunions/web dev",
+    "dev:worker": "pnpm --filter @appunions/worker dev",
+    "db:migrate": "pnpm --filter @appunions/db migrate",
+    "test": "pnpm --filter @appunions/api test",
+    "build": "pnpm -r build"
+  }
+}

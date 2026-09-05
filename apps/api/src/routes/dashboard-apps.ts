@@ -1,4 +1,5 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import { Hono } from "hono";
+import type { Context } from "hono";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -8,6 +9,7 @@ import {
   apps,
   getConfig,
   graceDaysLeft,
+  isUniqueViolation,
   listCategoryTree,
   platformsForApps,
   syncAppPoolFlag,
@@ -27,13 +29,14 @@ import {
   isValidCategoryName,
   isValidPackageName,
 } from "@appunions/shared";
-import { db } from "../db.js";
-import { sendError } from "../errors.js";
+import { getDb } from "../db.js";
+import { readJson, routeParam, type AppEnv } from "../context.js";
+import { HttpError, sendError } from "../errors.js";
 import { generateApiKey } from "../lib/api-keys.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import { mustUser, requireUser } from "../lib/session.js";
-import { invalidatePoolCache } from "../lib/redis-ops.js";
-import { uploadIcon } from "../s3.js";
+import { invalidatePoolCache } from "../kv.js";
+import { uploadIcon } from "../r2.js";
 import { utcDay } from "../lib/stats.js";
 
 const patchSchema = z.object({
@@ -67,16 +70,7 @@ function publicFields(app: typeof apps.$inferSelect) {
   };
 }
 
-function isUniqueViolation(err: unknown) {
-  let current: unknown = err;
-  for (let i = 0; i < 5 && current && typeof current === "object"; i++) {
-    if ("code" in current && (current as { code: unknown }).code === "23505") return true;
-    current = "cause" in current ? (current as { cause: unknown }).cause : undefined;
-  }
-  return false;
-}
-
-async function ownedApp(developerId: string, appId: string) {
+async function ownedApp(db: ReturnType<typeof getDb>, developerId: string, appId: string) {
   const rows = await db
     .select()
     .from(apps)
@@ -85,7 +79,7 @@ async function ownedApp(developerId: string, appId: string) {
   return rows[0] ?? null;
 }
 
-async function keyPrefix(appId: string) {
+async function keyPrefix(db: ReturnType<typeof getDb>, appId: string) {
   const rows = await db
     .select()
     .from(apiKeys)
@@ -94,7 +88,8 @@ async function keyPrefix(appId: string) {
   return rows[0]?.keyPrefix ?? "";
 }
 
-async function present(app: typeof apps.$inferSelect) {
+async function present(c: Context<AppEnv>, app: typeof apps.$inferSelect) {
+  const db = getDb(c.env.DB);
   const config = await getConfig(db);
   const left = graceDaysLeft(app.approvedAt, config.graceDays);
   const gap = Math.max(0, config.reciprocityImpressions - app.contributedImpressions7d);
@@ -112,55 +107,54 @@ async function present(app: typeof apps.$inferSelect) {
     graceDaysLeft: left,
     reciprocityThreshold: config.reciprocityImpressions,
     reciprocityGap: gap,
-    keyPrefix: await keyPrefix(app.id),
+    keyPrefix: await keyPrefix(db, app.id),
   };
 }
 
-async function parseMultipart(request: Parameters<FastifyInstance["post"]>[1] extends infer _ ? any : never) {
+async function parseMultipart(c: Context<AppEnv>) {
+  const body = await c.req.parseBody();
   const fields: Record<string, string> = {};
-  let icon: { buf: Buffer; mime: string } | null = null;
-  const parts = request.parts();
-  for await (const part of parts) {
-    if (part.type === "file") {
-      const buf = await part.toBuffer();
-      icon = { buf, mime: part.mimetype };
-    } else {
-      fields[part.fieldname] = String(part.value);
+  let icon: { buf: Uint8Array; mime: string } | null = null;
+  for (const [key, value] of Object.entries(body)) {
+    if (value instanceof File) {
+      icon = { buf: new Uint8Array(await value.arrayBuffer()), mime: value.type };
+    } else if (typeof value === "string") {
+      fields[key] = value;
     }
   }
   return { fields, icon };
 }
 
 async function resolveCategoryPair(
+  c: Context<AppEnv>,
   parentRaw: string,
   childRaw: string,
-  reply: FastifyReply,
-): Promise<{ category: string; subcategory: string } | undefined> {
+): Promise<{ category: string; subcategory: string }> {
   if (!isValidCategoryName(parentRaw) || !isValidCategoryName(childRaw)) {
-    sendError(reply, 400, ERROR_CODES.invalid_params, "请填写有效的大分类和小分类");
-    return;
+    throw new HttpError(400, ERROR_CODES.invalid_params, "请填写有效的大分类和小分类");
   }
   try {
-    return await upsertCategoryPair(db, parentRaw, childRaw);
+    return await upsertCategoryPair(getDb(c.env.DB), parentRaw, childRaw);
   } catch {
-    sendError(reply, 400, ERROR_CODES.invalid_params, "分类无效");
-    return;
+    throw new HttpError(400, ERROR_CODES.invalid_params, "分类无效");
   }
 }
 
-export async function dashboardAppRoutes(app: FastifyInstance) {
-  app.get("/dashboard/categories", { preHandler: requireUser() }, async () => {
-    const tree = await listCategoryTree(db);
-    return {
+export function dashboardAppRoutes(app: Hono<AppEnv>) {
+  app.get("/dashboard/categories", requireUser, async (c) => {
+    const tree = await listCategoryTree(getDb(c.env.DB));
+    return c.json({
       items: tree.map((root) => ({
         id: root.id,
         name: root.name,
         children: root.children.map((child) => ({ id: child.id, name: child.name })),
       })),
-    };
+    });
   });
-  app.get("/dashboard/apps", { preHandler: requireUser() }, async (request) => {
-    const user = mustUser(request);
+
+  app.get("/dashboard/apps", requireUser, async (c) => {
+    const user = mustUser(c);
+    const db = getDb(c.env.DB);
     const list = await db
       .select()
       .from(apps)
@@ -176,7 +170,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       list.map(async (row) => {
         const rec = await db
           .select({
-            total: sql<number>`coalesce(sum(${appDailyStats.impressionsReceived}), 0)::int`,
+            total: sql<number>`cast(coalesce(sum(${appDailyStats.impressionsReceived}), 0) as integer)`,
           })
           .from(appDailyStats)
           .where(and(eq(appDailyStats.appId, row.id), sql`${appDailyStats.day} >= ${since}`));
@@ -190,105 +184,102 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
           pausedByOps: row.pausedByOps,
           inRecommendPool: row.inRecommendPool,
           graceDaysLeft: graceDaysLeft(row.approvedAt, config.graceDays),
-          impressionsReceived7d: rec[0]?.total ?? 0,
+          impressionsReceived7d: Number(rec[0]?.total ?? 0),
         };
       }),
     );
-    return { items };
+    return c.json({ items });
   });
 
-  app.post("/dashboard/apps", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { fields, icon } = await parseMultipart(request);
+  app.post("/dashboard/apps", requireUser, async (c) => {
+    const user = mustUser(c);
+    const db = getDb(c.env.DB);
+    const { fields, icon } = await parseMultipart(c);
     const name = fields.name?.trim();
     const tagline = fields.tagline?.trim();
     const category = fields.category;
     const subcategory = fields.subcategory;
     if (!name || !tagline || !category || !subcategory) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写完整资料");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请填写完整资料");
     }
-    const pair = await resolveCategoryPair(category, subcategory, reply);
-    if (!pair) return;
+    const pair = await resolveCategoryPair(c, category, subcategory);
     if (graphemeLength(tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
     if (!icon) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请上传图标");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请上传图标");
     }
     if (!["image/png", "image/jpeg", "image/webp"].includes(icon.mime)) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "图标需为 png/jpeg/webp");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标需为 png/jpeg/webp");
     }
-    if (icon.buf.length > ICON_MAX_BYTES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "图标不能超过 512KB");
+    if (icon.buf.byteLength > ICON_MAX_BYTES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标不能超过 512KB");
     }
 
-    const created = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(apps)
-        .values({
-          developerId: user.id,
-          name,
-          iconUrl: "pending",
-          tagline,
-          category: pair.category,
-          subcategory: pair.subcategory,
-          listSize: LIST_SIZE_DEFAULT,
-        })
-        .returning();
-      const key = generateApiKey();
-      await tx.insert(apiKeys).values({
-        appId: row!.id,
-        keyPrefix: key.prefix,
-        keyHash: key.hash,
-      });
-      return { row: row!, apiKey: key.plaintext };
+    const [row] = await db
+      .insert(apps)
+      .values({
+        developerId: user.id,
+        name,
+        iconUrl: "pending",
+        tagline,
+        category: pair.category,
+        subcategory: pair.subcategory,
+        listSize: LIST_SIZE_DEFAULT,
+      })
+      .returning();
+    const key = generateApiKey();
+    await db.insert(apiKeys).values({
+      appId: row!.id,
+      keyPrefix: key.prefix,
+      keyHash: key.hash,
     });
 
-    const iconUrl = await uploadIcon(created.row.id, icon.buf, icon.mime);
+    const iconUrl = await uploadIcon(c.env.ICONS, row!.id, icon.buf, icon.mime);
     const [updated] = await db
       .update(apps)
       .set({ iconUrl, updatedAt: new Date() })
-      .where(eq(apps.id, created.row.id))
+      .where(eq(apps.id, row!.id))
       .returning();
 
-    return {
-      app: await present(updated!),
-      apiKey: created.apiKey,
-    };
+    return c.json({
+      app: await present(c, updated!),
+      apiKey: key.plaintext,
+    });
   });
 
-  app.get("/dashboard/apps/:id", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
-    return present(row);
+  app.get("/dashboard/apps/:id", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const row = await ownedApp(getDb(c.env.DB), user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
+    return c.json(await present(c, row));
   });
 
-  app.patch("/dashboard/apps/:id", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.patch("/dashboard/apps/:id", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     if (row.pausedByOps) {
-      return sendError(reply, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
+      return sendError(c, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
     }
-    const parsed = patchSchema.safeParse(request.body);
+    const parsed = patchSchema.safeParse(await readJson(c));
     if (!parsed.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "参数无效");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "参数无效");
     }
     if (parsed.data.tagline && graphemeLength(parsed.data.tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
     let category = row.category;
     let subcategory = row.subcategory;
     if (parsed.data.category || parsed.data.subcategory) {
       const pair = await resolveCategoryPair(
+        c,
         parsed.data.category ?? row.category,
         parsed.data.subcategory ?? row.subcategory,
-        reply,
       );
-      if (!pair) return;
       category = pair.category;
       subcategory = pair.subcategory;
     }
@@ -304,63 +295,63 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       })
       .where(eq(apps.id, id))
       .returning();
-    return present(updated!);
+    return c.json(await present(c, updated!));
   });
 
-  app.put("/dashboard/apps/:id/platforms", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.put("/dashboard/apps/:id/platforms", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     if (row.pausedByOps) {
-      return sendError(reply, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
+      return sendError(c, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
     }
-    const parsed = platformsSchema.safeParse(request.body);
+    const parsed = platformsSchema.safeParse(await readJson(c));
     if (!parsed.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "平台参数无效");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "平台参数无效");
     }
     const seen = new Set<string>();
     for (const item of parsed.data.platforms) {
       if (seen.has(item.platform)) {
-        return sendError(reply, 400, ERROR_CODES.invalid_params, "同一端只能填一次");
+        return sendError(c, 400, ERROR_CODES.invalid_params, "同一端只能填一次");
       }
       seen.add(item.platform);
       const packageName = item.packageName.trim();
       if (!isValidPackageName(packageName)) {
-        return sendError(reply, 400, ERROR_CODES.invalid_params, "包名格式无效，需为反向域名如 com.company.app");
+        return sendError(c, 400, ERROR_CODES.invalid_params, "包名格式无效，需为反向域名如 com.company.app");
       }
     }
     try {
-      await db.transaction(async (tx) => {
-        await tx.delete(appPlatforms).where(eq(appPlatforms.appId, id));
-        if (parsed.data.platforms.length > 0) {
-          await tx.insert(appPlatforms).values(
-            parsed.data.platforms.map((item) => ({
-              appId: id,
-              platform: item.platform,
-              packageName: item.packageName.trim(),
-            })),
-          );
-        }
-      });
+      await db.delete(appPlatforms).where(eq(appPlatforms.appId, id));
+      if (parsed.data.platforms.length > 0) {
+        await db.insert(appPlatforms).values(
+          parsed.data.platforms.map((item) => ({
+            appId: id,
+            platform: item.platform,
+            packageName: item.packageName.trim(),
+          })),
+        );
+      }
     } catch (err) {
       if (isUniqueViolation(err)) {
-        return sendError(reply, 409, ERROR_CODES.invalid_params, "该端包名已被其他应用占用");
+        return sendError(c, 409, ERROR_CODES.invalid_params, "该端包名已被其他应用占用");
       }
       throw err;
     }
-    await invalidatePoolCache();
-    const fresh = await ownedApp(user.id, id);
-    return present(fresh!);
+    await invalidatePoolCache(c.env.KV);
+    const fresh = await ownedApp(db, user.id, id);
+    return c.json(await present(c, fresh!));
   });
 
-  app.post("/dashboard/apps/:id/resubmit", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.post("/dashboard/apps/:id/resubmit", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     if (row.reviewStatus !== "rejected") {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "仅被拒绝的应用可重提");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "仅被拒绝的应用可重提");
     }
     const [updated] = await db
       .update(apps)
@@ -371,126 +362,131 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       })
       .where(eq(apps.id, id))
       .returning();
-    return present(updated!);
+    return c.json(await present(c, updated!));
   });
 
-  app.post("/dashboard/apps/:id/pause", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.post("/dashboard/apps/:id/pause", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     const [updated] = await db
       .update(apps)
       .set({ pausedByDeveloper: true, inRecommendPool: false, updatedAt: new Date() })
       .where(eq(apps.id, id))
       .returning();
-    await invalidatePoolCache();
-    return present(updated!);
+    await invalidatePoolCache(c.env.KV);
+    return c.json(await present(c, updated!));
   });
 
-  app.post("/dashboard/apps/:id/resume", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.post("/dashboard/apps/:id/resume", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     if (row.pausedByOps) {
-      return sendError(reply, 403, ERROR_CODES.forbidden, "运营已暂停，无法自行恢复");
+      return sendError(c, 403, ERROR_CODES.forbidden, "运营已暂停，无法自行恢复");
     }
     await db.update(apps).set({ pausedByDeveloper: false, updatedAt: new Date() }).where(eq(apps.id, id));
     await syncAppPoolFlag(db, id);
-    await invalidatePoolCache();
-    const fresh = await ownedApp(user.id, id);
-    return present(fresh!);
+    await invalidatePoolCache(c.env.KV);
+    const fresh = await ownedApp(db, user.id, id);
+    return c.json(await present(c, fresh!));
   });
 
-  app.post("/dashboard/apps/:id/api-key/rotate", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.post("/dashboard/apps/:id/api-key/rotate", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     const key = generateApiKey();
-    await db.transaction(async (tx) => {
-      await tx
-        .update(apiKeys)
-        .set({ revokedAt: new Date() })
-        .where(and(eq(apiKeys.appId, id), sql`${apiKeys.revokedAt} is null`));
-      await tx.insert(apiKeys).values({
-        appId: id,
-        keyPrefix: key.prefix,
-        keyHash: key.hash,
-      });
+    await db
+      .update(apiKeys)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(apiKeys.appId, id), sql`${apiKeys.revokedAt} is null`));
+    await db.insert(apiKeys).values({
+      appId: id,
+      keyPrefix: key.prefix,
+      keyHash: key.hash,
     });
-    const fresh = await ownedApp(user.id, id);
-    return { app: await present(fresh!), apiKey: key.plaintext };
+    const fresh = await ownedApp(db, user.id, id);
+    return c.json({ app: await present(c, fresh!), apiKey: key.plaintext });
   });
 
-  app.post("/dashboard/apps/:id/icon", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
-    const { icon } = await parseMultipart(request);
-    if (!icon) return sendError(reply, 400, ERROR_CODES.invalid_params, "请上传图标");
+  app.post("/dashboard/apps/:id/icon", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
+    const { icon } = await parseMultipart(c);
+    if (!icon) return sendError(c, 400, ERROR_CODES.invalid_params, "请上传图标");
     if (!["image/png", "image/jpeg", "image/webp"].includes(icon.mime)) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "图标需为 png/jpeg/webp");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标需为 png/jpeg/webp");
     }
-    if (icon.buf.length > ICON_MAX_BYTES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "图标不能超过 512KB");
+    if (icon.buf.byteLength > ICON_MAX_BYTES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标不能超过 512KB");
     }
-    const iconUrl = await uploadIcon(id, icon.buf, icon.mime);
+    const iconUrl = await uploadIcon(c.env.ICONS, id, icon.buf, icon.mime);
     const [updated] = await db
       .update(apps)
       .set({ iconUrl, updatedAt: new Date() })
       .where(eq(apps.id, id))
       .returning();
-    return present(updated!);
+    return c.json(await present(c, updated!));
   });
 
-  app.get("/dashboard/apps/:id/preview/recommend", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.get("/dashboard/apps/:id/preview/recommend", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
       })
-      .safeParse(request.query);
+      .safeParse(c.req.query());
     if (!q.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
     }
-    if (!(await hostHasPlatform(id, q.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    if (!(await hostHasPlatform(db, id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
-    const items = await recommendItems(id, q.data.platform, row.listSize);
-    return { items };
+    const items = await recommendItems(db, c.env.KV, id, q.data.platform, row.listSize);
+    return c.json({ items });
   });
 
-  app.get("/dashboard/apps/:id/preview/apps", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.get("/dashboard/apps/:id/preview/apps", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
         page: z.coerce.number().int().min(1).default(1),
         page_size: z.coerce.number().int().min(1).max(LIST_MAX_PAGE_SIZE).default(LIST_DEFAULT_PAGE_SIZE),
       })
-      .safeParse(request.query);
-    if (!q.success) return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
-    if (!(await hostHasPlatform(id, q.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+      .safeParse(c.req.query());
+    if (!q.success) return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
+    if (!(await hostHasPlatform(db, id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
-    return listItems(id, q.data.platform, q.data.page, q.data.page_size);
+    return c.json(await listItems(db, id, q.data.platform, q.data.page, q.data.page_size));
   });
 
-  app.get("/dashboard/apps/:id/stats", { preHandler: requireUser() }, async (request, reply) => {
-    const user = mustUser(request);
-    const { id } = request.params as { id: string };
-    const range = (request.query as { range?: string }).range === "30d" ? 30 : 7;
-    const row = await ownedApp(user.id, id);
-    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+  app.get("/dashboard/apps/:id/stats", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const range = c.req.query("range") === "30d" ? 30 : 7;
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
     const config = await getConfig(db);
     const since = utcDay(new Date(Date.now() - (range - 1) * 24 * 60 * 60 * 1000));
     const seriesRows = await db
@@ -529,7 +525,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       });
     }
 
-    return {
+    return c.json({
       range: range === 30 ? "30d" : "7d",
       impressionsReceived: totals.impressionsReceived,
       clicksReceived: totals.clicksReceived,
@@ -543,6 +539,6 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       contributedImpressions7d: row.contributedImpressions7d,
       reciprocityGap: Math.max(0, config.reciprocityImpressions - row.contributedImpressions7d),
       series,
-    };
+    });
   });
 }

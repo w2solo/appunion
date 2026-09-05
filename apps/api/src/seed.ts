@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import { categories, developers, platformConfig } from "@appunions/db/schema";
 import { DEFAULT_CATEGORY_TREE, SUPER_ADMIN_EMAIL } from "@appunions/shared";
-import { db } from "./db.js";
+import { getDb } from "./db.js";
 
-async function seedDefaultCategories() {
+async function seedDefaultCategories(d1: D1Database) {
+  const db = getDb(d1);
   const existing = await db.select({ id: categories.id }).from(categories).limit(1);
   if (existing[0]) return;
   for (const group of DEFAULT_CATEGORY_TREE) {
@@ -13,13 +14,14 @@ async function seedDefaultCategories() {
   }
 }
 
-export async function seed() {
+export async function seed(d1: D1Database) {
+  const db = getDb(d1);
   const cfg = await db.select().from(platformConfig).limit(1);
   if (!cfg[0]) {
     await db.insert(platformConfig).values({ id: 1 });
   }
 
-  await seedDefaultCategories();
+  await seedDefaultCategories(d1);
 
   const existing = await db
     .select()

@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import { Hono } from "hono";
 import { and, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -19,25 +19,32 @@ import {
   RECOMMEND_MAX,
   type Platform,
 } from "@appunions/shared";
-import { db } from "../db.js";
+import { getDb } from "../db.js";
+import { readJson, type AppEnv } from "../context.js";
 import { sendError } from "../errors.js";
 import { hashApiKey } from "../lib/api-keys.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
-import {
-  impressionDedupSet,
-  rateLimit,
-  recentUnion,
-  rememberRecent,
-} from "../lib/redis-ops.js";
+import { impressionDedupSet, rateLimit, recentUnion, rememberRecent } from "../kv.js";
 import { bumpStats } from "../lib/stats.js";
 
 type Host = typeof apps.$inferSelect;
 
-async function hostFromKey(request: FastifyRequest): Promise<Host | { error: true; status: number; code: typeof ERROR_CODES[keyof typeof ERROR_CODES]; message: string }> {
-  const header = request.headers.authorization;
+async function hostFromKey(
+  c: { env: Env; req: { header: (name: string) => string | undefined } },
+): Promise<
+  | Host
+  | {
+      error: true;
+      status: 401 | 403;
+      code: (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+      message: string;
+    }
+> {
+  const header = c.req.header("authorization");
   if (!header?.startsWith("Bearer ")) {
     return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid API key" };
   }
+  const db = getDb(c.env.DB);
   const token = header.slice("Bearer ".length).trim();
   const hash = hashApiKey(token);
   const keyRows = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hash)).limit(1);
@@ -73,7 +80,7 @@ function isHost(v: Awaited<ReturnType<typeof hostFromKey>>): v is Host {
   return !("error" in v);
 }
 
-async function listingFor(appId: string, platform: Platform) {
+async function listingFor(db: ReturnType<typeof getDb>, appId: string, platform: Platform) {
   const rows = await db
     .select()
     .from(appPlatforms)
@@ -82,65 +89,70 @@ async function listingFor(appId: string, platform: Platform) {
   return rows[0] ?? null;
 }
 
-export async function v1Routes(app: FastifyInstance) {
-  app.get("/v1/apps/recommend", async (request, reply) => {
-    const host = await hostFromKey(request);
-    if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
+export function v1Routes(app: Hono<AppEnv>) {
+  app.get("/v1/apps/recommend", async (c) => {
+    const host = await hostFromKey(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
         limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).optional(),
       })
-      .safeParse(request.query);
+      .safeParse(c.req.query());
     if (!q.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
     }
-    if (!(await hostHasPlatform(host.id, q.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    if (!(await hostHasPlatform(db, host.id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
     const config = await getConfig(db);
-    if (!(await rateLimit(`rec:${host.id}`, config.rateRecommendPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    if (!(await rateLimit(c.env.KV, `rec:${host.id}`, config.rateRecommendPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const limit = Math.min(q.data.limit ?? host.listSize, host.listSize, RECOMMEND_MAX);
-    const items = await recommendItems(host.id, q.data.platform, limit);
+    const items = await recommendItems(db, c.env.KV, host.id, q.data.platform, limit);
     await rememberRecent(
+      c.env.KV,
       host.id,
       items.map((i) => i.id),
     );
-    return { items };
+    return c.json({ items });
   });
 
-  app.get("/v1/apps", async (request, reply) => {
-    const host = await hostFromKey(request);
-    if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
+  app.get("/v1/apps", async (c) => {
+    const host = await hostFromKey(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
         page: z.coerce.number().int().min(1).default(1),
         page_size: z.coerce.number().int().min(1).max(LIST_MAX_PAGE_SIZE).default(LIST_DEFAULT_PAGE_SIZE),
       })
-      .safeParse(request.query);
-    if (!q.success) return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
-    if (!(await hostHasPlatform(host.id, q.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+      .safeParse(c.req.query());
+    if (!q.success) return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
+    if (!(await hostHasPlatform(db, host.id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
     const config = await getConfig(db);
-    if (!(await rateLimit(`list:${host.id}`, config.rateListPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    if (!(await rateLimit(c.env.KV, `list:${host.id}`, config.rateListPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, page, page_size } = q.data;
-    const data = await listItems(host.id, platform, page, page_size);
+    const data = await listItems(db, host.id, platform, page, page_size);
     await rememberRecent(
+      c.env.KV,
       host.id,
       data.items.map((i) => i.id),
     );
-    return data;
+    return c.json(data);
   });
 
-  app.post("/v1/events/impressions", async (request, reply) => {
-    const host = await hostFromKey(request);
-    if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
+  app.post("/v1/events/impressions", async (c) => {
+    const host = await hostFromKey(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
     const body = z
       .object({
         platform: z.enum(PLATFORMS),
@@ -156,16 +168,16 @@ export async function v1Routes(app: FastifyInstance) {
           .min(1)
           .max(IMPRESSION_BATCH_MAX),
       })
-      .safeParse(request.body);
+      .safeParse(await readJson(c));
     if (!body.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "Invalid impression payload");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "Invalid impression payload");
     }
-    if (!(await hostHasPlatform(host.id, body.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    if (!(await hostHasPlatform(db, host.id, body.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
     const config = await getConfig(db);
-    if (!(await rateLimit(`imp:${host.id}`, config.rateImpressionsPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    if (!(await rateLimit(c.env.KV, `imp:${host.id}`, config.rateImpressionsPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
 
     const results: { app_id: string; idempotency_key: string; accepted: boolean; reason?: string }[] =
@@ -178,16 +190,31 @@ export async function v1Routes(app: FastifyInstance) {
       const targets = await db.select().from(apps).where(eq(apps.id, item.app_id)).limit(1);
       const target = targets[0];
       if (!target) {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "not_visible_in_catalog" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "not_visible_in_catalog",
+        });
         continue;
       }
-      const listing = await listingFor(item.app_id, body.data.platform);
+      const listing = await listingFor(db, item.app_id, body.data.platform);
       if (!listing) {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "platform_mismatch" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "platform_mismatch",
+        });
         continue;
       }
       if (!isCatalogVisible(target)) {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "not_visible_in_catalog" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "not_visible_in_catalog",
+        });
         continue;
       }
       const dupKey = await db
@@ -201,40 +228,55 @@ export async function v1Routes(app: FastifyInstance) {
         )
         .limit(1);
       if (dupKey[0]) {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "duplicate" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "duplicate",
+        });
         continue;
       }
       const windowOk = await impressionDedupSet(
+        c.env.KV,
         host.id,
         item.app_id,
         body.data.client_id,
         config.impressionDedupMinutes * 60,
       );
       if (!windowOk) {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "duplicate" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "duplicate",
+        });
         continue;
       }
       try {
-        await db.transaction(async (tx) => {
-          await tx.insert(impressionEvents).values({
-            hostAppId: host.id,
-            targetAppId: item.app_id,
-            clientId: body.data.client_id,
-            idempotencyKey: item.idempotency_key,
-          });
+        await db.insert(impressionEvents).values({
+          hostAppId: host.id,
+          targetAppId: item.app_id,
+          clientId: body.data.client_id,
+          idempotencyKey: item.idempotency_key,
         });
-        await bumpStats({ hostId: host.id, targetId: item.app_id, impression: true });
+        await bumpStats(db, { hostId: host.id, targetId: item.app_id, impression: true });
         results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: true });
       } catch {
-        results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "duplicate" });
+        results.push({
+          app_id: item.app_id,
+          idempotency_key: item.idempotency_key,
+          accepted: false,
+          reason: "duplicate",
+        });
       }
     }
-    return { results };
+    return c.json({ results });
   });
 
-  app.post("/v1/events/clicks", async (request, reply) => {
-    const host = await hostFromKey(request);
-    if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
+  app.post("/v1/events/clicks", async (c) => {
+    const host = await hostFromKey(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
     const body = z
       .object({
         platform: z.enum(PLATFORMS),
@@ -242,31 +284,31 @@ export async function v1Routes(app: FastifyInstance) {
         app_id: z.string().uuid(),
         idempotency_key: z.string().uuid(),
       })
-      .safeParse(request.body);
+      .safeParse(await readJson(c));
     if (!body.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "Invalid click payload");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "Invalid click payload");
     }
-    if (!(await hostHasPlatform(host.id, body.data.platform))) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    if (!(await hostHasPlatform(db, host.id, body.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
     const config = await getConfig(db);
-    if (!(await rateLimit(`clk:${host.id}`, config.rateClicksPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    if (!(await rateLimit(c.env.KV, `clk:${host.id}`, config.rateClicksPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, client_id, app_id, idempotency_key } = body.data;
-    if (app_id === host.id) return { accepted: false, reason: "self" };
+    if (app_id === host.id) return c.json({ accepted: false, reason: "self" });
     const targets = await db.select().from(apps).where(eq(apps.id, app_id)).limit(1);
     const target = targets[0];
-    const listing = await listingFor(app_id, platform);
+    const listing = await listingFor(db, app_id, platform);
     if (!target || !listing || !isCatalogVisible(target)) {
-      return { accepted: false, reason: "not_visible_in_catalog" };
+      return c.json({ accepted: false, reason: "not_visible_in_catalog" });
     }
     const existing = await db
       .select()
       .from(clickEvents)
       .where(and(eq(clickEvents.hostAppId, host.id), eq(clickEvents.idempotencyKey, idempotency_key)))
       .limit(1);
-    if (existing[0]) return { accepted: false, reason: "duplicate" };
+    if (existing[0]) return c.json({ accepted: false, reason: "duplicate" });
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const imps = await db
       .select()
@@ -280,9 +322,9 @@ export async function v1Routes(app: FastifyInstance) {
         ),
       )
       .limit(1);
-    if (!imps[0]) return { accepted: false, reason: "no_recent_impression" };
-    const recent = await recentUnion(host.id);
-    if (!recent.has(app_id)) return { accepted: false, reason: "not_in_recent_list" };
+    if (!imps[0]) return c.json({ accepted: false, reason: "no_recent_impression" });
+    const recent = await recentUnion(c.env.KV, host.id);
+    if (!recent.has(app_id)) return c.json({ accepted: false, reason: "not_in_recent_list" });
     try {
       await db.insert(clickEvents).values({
         hostAppId: host.id,
@@ -290,10 +332,10 @@ export async function v1Routes(app: FastifyInstance) {
         clientId: client_id,
         idempotencyKey: idempotency_key,
       });
-      await bumpStats({ hostId: host.id, targetId: app_id, click: true });
-      return { accepted: true };
+      await bumpStats(db, { hostId: host.id, targetId: app_id, click: true });
+      return c.json({ accepted: true });
     } catch {
-      return { accepted: false, reason: "duplicate" };
+      return c.json({ accepted: false, reason: "duplicate" });
     }
   });
 }

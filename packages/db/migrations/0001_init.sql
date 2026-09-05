@@ -1,116 +1,128 @@
-create extension if not exists citext;
-create extension if not exists pgcrypto;
-
-create table developers (
-  id uuid primary key default gen_random_uuid(),
-  email citext not null unique,
-  password_hash text not null,
-  role text not null default 'developer',
-  created_at timestamptz not null default now()
+CREATE TABLE developers (
+  id text PRIMARY KEY NOT NULL,
+  email text NOT NULL,
+  password_hash text NOT NULL,
+  role text NOT NULL DEFAULT 'developer',
+  created_at integer NOT NULL
 );
+CREATE UNIQUE INDEX developers_email_uidx ON developers (email);
 
-create table apps (
-  id uuid primary key default gen_random_uuid(),
-  developer_id uuid not null references developers(id),
-  name text not null,
-  icon_url text not null,
-  tagline text not null,
-  category text not null,
-  platform text not null,
-  store_url text not null,
-  deeplink text,
-  review_status text not null default 'pending',
-  paused_by_developer boolean not null default false,
-  paused_by_ops boolean not null default false,
+CREATE TABLE apps (
+  id text PRIMARY KEY NOT NULL,
+  developer_id text NOT NULL REFERENCES developers(id),
+  name text NOT NULL,
+  icon_url text NOT NULL,
+  tagline text NOT NULL,
+  category text NOT NULL,
+  subcategory text NOT NULL DEFAULT '其他',
+  review_status text NOT NULL DEFAULT 'pending',
+  paused_by_developer integer NOT NULL DEFAULT 0,
+  paused_by_ops integer NOT NULL DEFAULT 0,
   rejected_reason text,
-  approved_at timestamptz,
-  in_recommend_pool boolean not null default false,
-  contributed_impressions_7d integer not null default 0,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  approved_at integer,
+  in_recommend_pool integer NOT NULL DEFAULT 0,
+  contributed_impressions_7d integer NOT NULL DEFAULT 0,
+  list_size integer NOT NULL DEFAULT 10,
+  created_at integer NOT NULL,
+  updated_at integer NOT NULL
 );
+CREATE INDEX apps_pool_idx ON apps (in_recommend_pool);
+CREATE INDEX apps_developer_idx ON apps (developer_id);
 
-create index apps_platform_idx on apps (platform);
-create index apps_pool_idx on apps (platform, in_recommend_pool);
-create index apps_developer_idx on apps (developer_id);
-
-create table api_keys (
-  id uuid primary key default gen_random_uuid(),
-  app_id uuid not null references apps(id),
-  key_prefix text not null,
-  key_hash text not null,
-  created_at timestamptz not null default now(),
-  revoked_at timestamptz
+CREATE TABLE app_platforms (
+  id text PRIMARY KEY NOT NULL,
+  app_id text NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+  platform text NOT NULL,
+  package_name text NOT NULL,
+  created_at integer NOT NULL
 );
+CREATE UNIQUE INDEX app_platforms_app_platform_uidx ON app_platforms (app_id, platform);
+CREATE UNIQUE INDEX app_platforms_platform_package_uidx ON app_platforms (platform, package_name);
+CREATE INDEX app_platforms_platform_idx ON app_platforms (platform);
 
-create unique index api_keys_hash_uidx on api_keys (key_hash);
-create unique index api_keys_one_active_uidx on api_keys (app_id) where revoked_at is null;
+CREATE TABLE api_keys (
+  id text PRIMARY KEY NOT NULL,
+  app_id text NOT NULL REFERENCES apps(id),
+  key_prefix text NOT NULL,
+  key_hash text NOT NULL,
+  created_at integer NOT NULL,
+  revoked_at integer
+);
+CREATE UNIQUE INDEX api_keys_hash_uidx ON api_keys (key_hash);
+CREATE UNIQUE INDEX api_keys_one_active_uidx ON api_keys (app_id) WHERE revoked_at IS NULL;
 
-create table app_reviews (
-  id uuid primary key default gen_random_uuid(),
-  app_id uuid not null references apps(id),
-  actor_id uuid not null references developers(id),
-  action text not null,
+CREATE TABLE app_reviews (
+  id text PRIMARY KEY NOT NULL,
+  app_id text NOT NULL REFERENCES apps(id),
+  actor_id text NOT NULL REFERENCES developers(id),
+  action text NOT NULL,
   reason text,
-  created_at timestamptz not null default now()
+  created_at integer NOT NULL
 );
 
-create table impression_events (
-  id uuid primary key default gen_random_uuid(),
-  host_app_id uuid not null references apps(id),
-  target_app_id uuid not null references apps(id),
-  client_id uuid not null,
-  idempotency_key uuid not null,
-  occurred_at timestamptz not null default now()
+CREATE TABLE impression_events (
+  id text PRIMARY KEY NOT NULL,
+  host_app_id text NOT NULL REFERENCES apps(id),
+  target_app_id text NOT NULL REFERENCES apps(id),
+  client_id text NOT NULL,
+  idempotency_key text NOT NULL,
+  occurred_at integer NOT NULL
+);
+CREATE UNIQUE INDEX impressions_host_idem_uidx ON impression_events (host_app_id, idempotency_key);
+CREATE INDEX impressions_host_time_idx ON impression_events (host_app_id, occurred_at);
+CREATE INDEX impressions_target_time_idx ON impression_events (target_app_id, occurred_at);
+CREATE INDEX impressions_dedup_idx ON impression_events (host_app_id, target_app_id, client_id, occurred_at);
+
+CREATE TABLE click_events (
+  id text PRIMARY KEY NOT NULL,
+  host_app_id text NOT NULL REFERENCES apps(id),
+  target_app_id text NOT NULL REFERENCES apps(id),
+  client_id text NOT NULL,
+  idempotency_key text NOT NULL,
+  occurred_at integer NOT NULL
+);
+CREATE UNIQUE INDEX clicks_host_idem_uidx ON click_events (host_app_id, idempotency_key);
+CREATE INDEX clicks_host_time_idx ON click_events (host_app_id, occurred_at);
+CREATE INDEX clicks_target_time_idx ON click_events (target_app_id, occurred_at);
+
+CREATE TABLE app_daily_stats (
+  app_id text NOT NULL REFERENCES apps(id),
+  day text NOT NULL,
+  impressions_received integer NOT NULL DEFAULT 0,
+  clicks_received integer NOT NULL DEFAULT 0,
+  impressions_given integer NOT NULL DEFAULT 0,
+  clicks_given integer NOT NULL DEFAULT 0,
+  PRIMARY KEY (app_id, day)
 );
 
-create unique index impressions_host_idem_uidx on impression_events (host_app_id, idempotency_key);
-create index impressions_host_time_idx on impression_events (host_app_id, occurred_at);
-create index impressions_target_time_idx on impression_events (target_app_id, occurred_at);
-create index impressions_dedup_idx on impression_events (host_app_id, target_app_id, client_id, occurred_at);
-
-create table click_events (
-  id uuid primary key default gen_random_uuid(),
-  host_app_id uuid not null references apps(id),
-  target_app_id uuid not null references apps(id),
-  client_id uuid not null,
-  idempotency_key uuid not null,
-  occurred_at timestamptz not null default now()
+CREATE TABLE categories (
+  id text PRIMARY KEY NOT NULL,
+  name text NOT NULL,
+  parent_id text,
+  created_at integer NOT NULL
 );
+CREATE INDEX categories_parent_idx ON categories (parent_id);
+CREATE UNIQUE INDEX categories_root_name_uidx ON categories (lower(name)) WHERE parent_id IS NULL;
+CREATE UNIQUE INDEX categories_child_name_uidx ON categories (parent_id, lower(name)) WHERE parent_id IS NOT NULL;
 
-create unique index clicks_host_idem_uidx on click_events (host_app_id, idempotency_key);
-create index clicks_host_time_idx on click_events (host_app_id, occurred_at);
-create index clicks_target_time_idx on click_events (target_app_id, occurred_at);
-
-create table app_daily_stats (
-  app_id uuid not null references apps(id),
-  day date not null,
-  impressions_received integer not null default 0,
-  clicks_received integer not null default 0,
-  impressions_given integer not null default 0,
-  clicks_given integer not null default 0,
-  primary key (app_id, day)
+CREATE TABLE platform_config (
+  id integer PRIMARY KEY DEFAULT 1,
+  grace_days integer NOT NULL DEFAULT 7,
+  reciprocity_impressions integer NOT NULL DEFAULT 100,
+  impression_dedup_minutes integer NOT NULL DEFAULT 30,
+  recommend_cache_seconds integer NOT NULL DEFAULT 30,
+  rate_recommend_per_min integer NOT NULL DEFAULT 60,
+  rate_list_per_min integer NOT NULL DEFAULT 60,
+  rate_impressions_per_min integer NOT NULL DEFAULT 120,
+  rate_clicks_per_min integer NOT NULL DEFAULT 60
 );
+INSERT INTO platform_config (id) VALUES (1);
 
-create table platform_config (
-  id integer primary key default 1,
-  grace_days integer not null default 7,
-  reciprocity_impressions integer not null default 100,
-  impression_dedup_minutes integer not null default 30,
-  recommend_cache_seconds integer not null default 30,
-  rate_recommend_per_min integer not null default 60,
-  rate_list_per_min integer not null default 60,
-  rate_impressions_per_min integer not null default 120,
-  rate_clicks_per_min integer not null default 60
-);
-
-insert into platform_config (id) values (1) on conflict (id) do nothing;
-
-create table anomaly_flags (
-  id uuid primary key default gen_random_uuid(),
-  app_id uuid not null references apps(id),
-  type text not null,
-  "window" text not null default '7d',
-  created_at timestamptz not null default now(),
-  resolved_at timestamptz
+CREATE TABLE anomaly_flags (
+  id text PRIMARY KEY NOT NULL,
+  app_id text NOT NULL REFERENCES apps(id),
+  type text NOT NULL,
+  "window" text NOT NULL DEFAULT '7d',
+  created_at integer NOT NULL,
+  resolved_at integer
 );

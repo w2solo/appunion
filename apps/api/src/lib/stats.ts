@@ -1,18 +1,20 @@
 import { and, eq, sql } from "drizzle-orm";
-import { appDailyStats } from "@appunions/db/schema";
-import { db } from "../db.js";
+import { appDailyStats, type AppDb } from "@appunions/db";
 
 export function utcDay(d = new Date()) {
   return d.toISOString().slice(0, 10);
 }
 
-export async function bumpStats(input: {
-  hostId: string;
-  targetId: string;
-  impression?: boolean;
-  click?: boolean;
-  day?: string;
-}) {
+export async function bumpStats(
+  db: AppDb,
+  input: {
+    hostId: string;
+    targetId: string;
+    impression?: boolean;
+    click?: boolean;
+    day?: string;
+  },
+) {
   const day = input.day ?? utcDay();
 
   await db
@@ -56,15 +58,4 @@ export async function bumpStats(input: {
           : appDailyStats.clicksReceived,
       },
     });
-}
-
-export async function receivedImpressionsSince(appId: string, days: number) {
-  const since = utcDay(new Date(Date.now() - (days - 1) * 24 * 60 * 60 * 1000));
-  const rows = await db
-    .select({
-      total: sql<number>`coalesce(sum(${appDailyStats.impressionsReceived}), 0)::int`,
-    })
-    .from(appDailyStats)
-    .where(and(eq(appDailyStats.appId, appId), sql`${appDailyStats.day} >= ${since}`));
-  return rows[0]?.total ?? 0;
 }

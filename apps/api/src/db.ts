@@ -1,7 +1,7 @@
-import { drizzle } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { drizzle } from "drizzle-orm/d1";
 import * as schema from "@appunions/db/schema";
-import { env } from "./env.js";
+import type { AppDb } from "@appunions/db";
 
-export const sql = postgres(env.DATABASE_URL);
-export const db = drizzle(sql, { schema });
+export function getDb(d1: D1Database): AppDb {
+  return drizzle(d1, { schema }) as AppDb;
+}

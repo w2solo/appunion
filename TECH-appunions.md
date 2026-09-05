@@ -34,51 +34,50 @@ flowchart LR
   subgraph host [开发者的 App]
     Native[Android / iOS / 鸿蒙]
   end
-  subgraph node [Node.js]
-    Api[Fastify api 进程]
-    Worker[worker 进程]
+  subgraph cf [Cloudflare]
+    Api[Hono Worker]
   end
-  PG[(PostgreSQL)]
-  Redis[(Redis)]
-  S3[S3 / MinIO]
+  D1[(D1)]
+  KV[(KV)]
+  R2[(R2)]
 
   Web -->|cookie 登录| Api
   Native -->|Bearer api_key| Api
-  Api --> PG
-  Api --> Redis
-  Api --> S3
-  Worker --> PG
-  Worker --> Redis
+  Api --> D1
+  Api --> KV
+  Api --> R2
 ```
 
-生产建议 **一个域名、反向代理分流**，避免 cookie 跨站，也避免前端路由和 API 撞车：
+生产建议 **一个域名**，由 Worker 按路径分流：
 
 | 路径前缀 | 交给谁 | 说明 |
 | --- | --- | --- |
-| `/v1/*` | Fastify | 开放 API |
-| `/dashboard/*` | Fastify | 开发者后台 API |
-| `/admin/*` | Fastify | 运营 API |
-| `/health` | Fastify | 探活 |
+| `/v1/*` | Hono Worker | 开放 API |
+| `/dashboard/*` | Hono Worker | 开发者后台 API |
+| `/admin/*` | Hono Worker | 运营 API |
+| `/health` | Hono Worker | 探活 |
+| `/media/*` | Hono Worker | R2 图标 |
 | 其它所有路径 | Web 静态资源 | SPA，前端路由 |
 
 因此 **页面路径不要用 `/dashboard`、`/admin`、`/v1`**。页面用 `/apps`、`/docs`、`/ops`。
 
-本地开发：Vite 把上述 API 前缀代理到 Fastify（如 `localhost:3000`），前端跑 `localhost:5173`。Cookie 在开发环境设 `SameSite=Lax`；生产同域后同样适用。
+本地开发：Vite 把上述 API 前缀代理到 `wrangler dev`（`localhost:8787`），前端跑 `localhost:5173`。Cookie 在开发环境设 `SameSite=Lax`；生产同域后同样适用。
 
 ---
 
 ## 3. 技术栈
 
-已确认不用 Cloudflare。整站都跑在自己的 Node / 静态托管上。
+整站部署在 Cloudflare Workers 上，不再自建 Node 进程。
 
 | 层 | 选择 |
 | --- | --- |
-| Web | React 18 + TypeScript + Vite + React Router |
+| Web | React 18 + TypeScript + Vite + React Router，作为 Worker 静态资源 |
 | UI | Tailwind CSS + 少量自研后台组件（表格、表单、对话框）。不引入很重的中台套件 |
 | 图表 | 轻量折线图（如 uPlot 或 Recharts），只用于 7/30 天趋势 |
 | 文档 | 仓库内 Markdown，构建时打进前端路由 `/docs/*` |
-| 后端 | Node.js 20 + Fastify + PostgreSQL + Redis + S3，见后端文档 |
-| 仓库 | 单仓 monorepo：`apps/web`、`apps/api`、`apps/worker`、`packages/*` |
+| 后端 | Cloudflare Workers + Hono + D1 + KV + R2 |
+| 定时任务 | 同一 Worker 的 Cron Triggers |
+| 仓库 | 单仓 monorepo：`apps/web`、`apps/api`、`packages/*` |
 
 Web **不写业务规则**（是否在推荐池、去重、审核状态机都在服务端）。前端只展示接口返回值，并做表单校验、空态、权限显隐。
 
@@ -97,7 +96,7 @@ Web **不写业务规则**（是否在推荐池、去重、审核状态机都在
 
 会话：
 
-1. 注册 / 登录成功，Fastify 写 httpOnly cookie（access + refresh）。
+1. 注册 / 登录成功，Worker 写 httpOnly cookie（access + refresh）。
 2. 前端启动时 `GET /dashboard/auth/me`，拿到 `{ id, email, role, superAdmin }`。
 3. 401 则清本地用户态，跳登录。
 4. 登出：`POST /dashboard/auth/logout`，跳 `/login`。
@@ -388,20 +387,18 @@ apps/web
 
 ```mermaid
 flowchart TB
-  User[浏览器] --> Nginx
-  App[宿主 App] --> Nginx
-  Nginx -->|"/" 静态"| WebDist[apps/web 构建产物]
-  Nginx -->|"/v1 /dashboard /admin /health"| Fastify
-  Fastify --> PG
-  Fastify --> Redis
-  Fastify --> S3
-  Worker --> PG
+  User[浏览器] --> Worker
+  App[宿主 App] --> Worker
+  Worker -->|"/" 静态"| WebDist[apps/web 构建产物]
+  Worker -->|"/v1 /dashboard /admin /health /media"| Hono[Hono]
+  Hono --> D1
+  Hono --> KV
+  Hono --> R2
 ```
 
-- Web：`vite build` 出静态文件，Nginx 对 SPA 回退 `index.html`。
-- API / worker：Node 长进程。
-- 配置：API 的 `PUBLIC_ORIGIN`、cookie `Secure`（生产）、S3 桶公开读图标或经 CDN。
-- 密钥、数据库 URL 只在 API/worker 环境变量里，不进前端 bundle。
+- Web：`vite build` 出静态文件，由 Worker Static Assets 托管，SPA 回退 `index.html`。
+- API 与 Cron：同一 Worker。
+- 密钥用 `wrangler secret put`，不进前端 bundle。
 
 ---
 
@@ -409,9 +406,8 @@ flowchart TB
 
 ```
 apps/web          Vite React 后台 + 文档
-apps/api          Fastify：/v1 /dashboard /admin
-apps/worker       推荐池、CTR 异常、日统计对账
-packages/db       Drizzle schema + 迁移
+apps/api          Hono Worker：/v1 /dashboard /admin + Cron
+packages/db       Drizzle schema + D1 迁移
 packages/shared   Zod、分类枚举、错误码、文档可引用的 API 类型
 ```
 

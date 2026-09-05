@@ -6,7 +6,7 @@
 | 完整设计 | [TECH-appunions.md](TECH-appunions.md)（Web 后台、文档站、运营台、部署） |
 | 范围 | 后端：开放 API、开发者后台 API、运营审核、统计、推荐池、基础反作弊 |
 | 不在本文 | Web 页面交互、接入文档正文、样式参考稿（见完整设计） |
-| 状态 | 待评审（技术栈已确认：Node.js，不用 Cloudflare） |
+| 状态 | 待评审（技术栈已确认：Cloudflare Workers + D1 + KV + R2） |
 
 本文给后端评审用。整站怎么拼、有哪些页面，看完整设计。先看第 1 节选型，再看第 4 节模型和第 6～8 节三条主链路。文末是待拍板的决策。
 
@@ -35,23 +35,23 @@ V1 后端要同时撑住三件事：
 
 | 层 | 选择 | 原因 |
 | --- | --- | --- |
-| 运行时 | Node.js 20 LTS | **已确认**：后端只跑在 Node 长进程上，不用 Cloudflare Workers / Pages / 任何边缘运行时 |
+| 运行时 | Cloudflare Workers | 不再自建 1Panel / Node 长进程 |
 | 语言 | TypeScript | 和后台前端同语言，接口类型可共享 |
-| HTTP | Fastify | Node 上常见的 API 框架，插件和 schema 校验成熟 |
-| 主库 | PostgreSQL 16 | 状态、事件、日统计都放这里 |
-| 缓存 / 限流 | Redis | 限流、幂等、推荐池 ID 列表 |
-| 对象存储 | AWS S3（本地用 MinIO） | App 图标；不用 R2 或其他 Cloudflare 存储 |
-| 开发者登录 | 邮箱 + 密码，JWT（access 15min + refresh 30d，httpOnly cookie） | V1 不做 SSO、不做团队成员 |
+| HTTP | Hono | Workers 上的轻量路由，和 Fetch API 对齐 |
+| 主库 | D1 | SQLite，和 Worker 同进程绑定 |
+| 缓存 / 限流 | KV | 验证码、限流、推荐池 ID 列表 |
+| 对象存储 | R2 | App 图标 |
+| 开发者登录 | 邮箱验证码，JWT（access 15min + refresh 30d，httpOnly cookie） | V1 不做 SSO、不做团队成员 |
 | 开放 API 鉴权 | `Authorization: Bearer <api_key>` | key 只存 SHA-256，明文只展示一次 |
-| 后台任务 | 同仓库一个 Node `worker` 进程，用定时器 + 行锁 | 量小，先不引入独立队列 |
+| 后台任务 | 同一 Worker 的 Cron Triggers | 量小，先不引入独立队列 |
 | ORM | Drizzle | schema 即文档，迁移可读 |
 | 校验 | Zod | 请求体、查询参数统一校验 |
 
-部署形态：`apps/web` 静态资源 + `api` / `worker` 两个 Node 进程 + Postgres + Redis + S3。生产同一域名反代：`/v1`、`/dashboard`、`/admin`、`/health` 进 Fastify，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。
+部署形态：一个 Worker 同时托管 `apps/web` 静态资源和 API。生产同一域名：`/v1`、`/dashboard`、`/admin`、`/health`、`/media` 进 Hono，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。
 
 **明确不选（V1）**
 
-- Cloudflare 全家桶：Workers、Pages、D1、KV、R2、Durable Objects。后端就是 Node.js。
+- Cloudflare 以外的自建 VPS / 1Panel：生产只跑在 Workers + D1 + KV + R2。
 - Kafka / SQS / ClickHouse：日 10 万事件量级用不上。
 - 带 UI 的 SDK、安装归因、设备指纹。
 - 多租户分库、读写分离。
@@ -75,12 +75,12 @@ flowchart TB
   end
 
   subgraph data [数据]
-    PG[(PostgreSQL)]
-    Redis[(Redis)]
-    S3[对象存储]
+    PG[(D1)]
+    Redis[(KV)]
+    S3[R2]
   end
 
-  Worker[worker 进程]
+  Worker[Cron]
 
   Mobile --> OpenAPI
   Web --> DashAPI
@@ -470,7 +470,7 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 2. 窗口：过去 `impression_dedup_minutes`（默认 30）内，同一 `(host, target, client_id)` 已有有效曝光 → `duplicate`。
 3. 通过则插入 `impression_events`，并 upsert 当天 `app_daily_stats`（host 的 given +1，target 的 received +1）。
 
-实现：窗口去重用 Redis `SET key NX EX`，key = `imp:{host}:{target}:{client}`，TTL = 去重分钟。同时写 Postgres。Redis 说重复则不写库；Postgres 唯一约束挡住重试双写。
+实现：窗口去重用 KV，key = `imp:{host}:{target}:{client}`，TTL = 去重分钟。同时写 D1。KV 说重复则不写库；D1 唯一约束挡住重试双写。
 
 ### 8.3 点击校验
 
@@ -602,7 +602,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 - `api_key` 只存哈希；日志、错误信息、看板都只打 `key_prefix`。
 - 开放 API 不返回其他开发者的邮箱、暂停原因、统计。
 - 图标：服务端转存，不信客户端传来的外链当主图（创建时也可以先填 URL，但 V1 只允许上传，避免 SSRF 去拉图）。
-- CORS：生产同域反代，浏览器调 `/dashboard` 不依赖跨域。`/v1` 给原生 App，不必对浏览器开放。开发环境由 Vite 代理到 Fastify。
+- CORS：生产同域，浏览器调 `/dashboard` 不依赖跨域。`/v1` 给原生 App，不必对浏览器开放。开发环境由 Vite 代理到 `wrangler dev`。
 - 限流对开放 API 必须有；登录接口按 IP + email 限流，防爆破。
 - 管理接口不暴露到文档站点。
 - 不在客户端 bundle 任何服务端密钥。
@@ -622,7 +622,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 - `pool_size{platform}`
 - `pending_review_count`
 
-健康检查：`GET /health` 查 Postgres + Redis。
+健康检查：`GET /health` 查 D1。
 
 ---
 
@@ -648,9 +648,8 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 
 ```
 apps/web          Vite React：开发者后台、文档、运营台
-apps/api          Fastify（Node.js）：/v1 /dashboard /admin
-apps/worker       Node.js 进程：池刷新、CTR 异常、日统计对账
-packages/db       Drizzle schema + 迁移
+apps/api          Hono Worker：/v1 /dashboard /admin + Cron
+packages/db       Drizzle schema + D1 迁移
 packages/shared   Zod 类型、分类枚举、错误码
 ```
 
@@ -677,6 +676,6 @@ packages/shared   Zod 类型、分类枚举、错误码
 
 **已拍板（不再讨论）**
 
-- 后端：Node.js 20 + Fastify + PostgreSQL + Redis + S3。不用 Cloudflare。
+- 后端：Cloudflare Workers + Hono + D1 + KV + R2。
 
 D1、D3、D6 对安全和数据质量影响最大，建议先定这三项再写代码。

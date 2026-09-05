@@ -1,6 +1,6 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { apps, impressionEvents, platformConfig, type App, type PlatformConfig } from "./schema.js";
+import type { AppDb } from "./types.js";
 
 export function computeInRecommendPool(
   app: Pick<
@@ -39,7 +39,7 @@ export function graceDaysLeft(
   return Math.max(0, Math.ceil((graceEnd - now.getTime()) / (24 * 60 * 60 * 1000)));
 }
 
-export async function getConfig(db: PostgresJsDatabase<any>) {
+export async function getConfig(db: AppDb) {
   const rows = await db.select().from(platformConfig).limit(1);
   const row = rows[0];
   if (!row) {
@@ -48,17 +48,17 @@ export async function getConfig(db: PostgresJsDatabase<any>) {
   return row;
 }
 
-export async function refreshRecommendPool(db: PostgresJsDatabase<any>) {
+export async function refreshRecommendPool(db: AppDb) {
   const config = await getConfig(db);
   const all = await db.select().from(apps);
   const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
   for (const app of all) {
     const given = await db
-      .select({ count: sql<number>`count(*)::int` })
+      .select({ count: sql<number>`cast(count(*) as integer)` })
       .from(impressionEvents)
       .where(and(eq(impressionEvents.hostAppId, app.id), gte(impressionEvents.occurredAt, since)));
-    const contributed = given[0]?.count ?? 0;
+    const contributed = Number(given[0]?.count ?? 0);
     const inPool = computeInRecommendPool(
       { ...app, contributedImpressions7d: contributed },
       config,
@@ -74,7 +74,7 @@ export async function refreshRecommendPool(db: PostgresJsDatabase<any>) {
   }
 }
 
-export async function syncAppPoolFlag(db: PostgresJsDatabase<any>, appId: string) {
+export async function syncAppPoolFlag(db: AppDb, appId: string) {
   const config = await getConfig(db);
   const rows = await db.select().from(apps).where(eq(apps.id, appId)).limit(1);
   const app = rows[0];

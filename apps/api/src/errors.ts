@@ -1,9 +1,11 @@
-import type { FastifyReply } from "fastify";
+import type { Context } from "hono";
 import { ERROR_CODES, type ErrorCode } from "@appunions/shared";
+import type { AppEnv } from "./context.js";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 export class HttpError extends Error {
   constructor(
-    public status: number,
+    public status: ContentfulStatusCode,
     public code: ErrorCode,
     message: string,
   ) {
@@ -11,14 +13,22 @@ export class HttpError extends Error {
   }
 }
 
-export function sendError(reply: FastifyReply, status: number, code: ErrorCode, message: string) {
-  return reply.code(status).send({ error: { code, message } });
+export function sendError(
+  c: Context<AppEnv>,
+  status: ContentfulStatusCode,
+  code: ErrorCode,
+  message: string,
+) {
+  return c.json({ error: { code, message } }, status);
 }
 
-export function httpErrorHandler(err: unknown, reply: FastifyReply) {
+export function errorResponse(err: unknown) {
   if (err instanceof HttpError) {
-    return sendError(reply, err.status, err.code, err.message);
+    return { status: err.status, body: { error: { code: err.code, message: err.message } } };
   }
   console.error(err);
-  return sendError(reply, 500, ERROR_CODES.internal_error, "Internal error");
+  return {
+    status: 500 as const,
+    body: { error: { code: ERROR_CODES.internal_error, message: "Internal error" } },
+  };
 }

@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { apps, categories, type Category } from "./schema.js";
+import type { AppDb } from "./types.js";
 
 export type CategoryNode = Category & { children: Category[] };
 
@@ -8,16 +8,12 @@ function normalize(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
-function isUniqueViolation(err: unknown) {
-  let current: unknown = err;
-  for (let i = 0; i < 5 && current && typeof current === "object"; i++) {
-    if ("code" in current && (current as { code: unknown }).code === "23505") return true;
-    current = "cause" in current ? (current as { cause: unknown }).cause : undefined;
-  }
-  return false;
+export function isUniqueViolation(err: unknown) {
+  const msg = err instanceof Error ? `${err.message} ${err.cause ?? ""}` : String(err);
+  return /UNIQUE constraint failed/i.test(msg) || /constraint failed/i.test(msg);
 }
 
-export async function listCategoryTree(db: PostgresJsDatabase<any>): Promise<CategoryNode[]> {
+export async function listCategoryTree(db: AppDb): Promise<CategoryNode[]> {
   const rows = await db.select().from(categories);
   const roots = rows.filter((row) => !row.parentId).sort((a, b) => a.name.localeCompare(b.name, "zh"));
   const children = rows.filter((row) => row.parentId);
@@ -29,7 +25,7 @@ export async function listCategoryTree(db: PostgresJsDatabase<any>): Promise<Cat
   }));
 }
 
-async function findRoot(db: PostgresJsDatabase<any>, name: string) {
+async function findRoot(db: AppDb, name: string) {
   const rows = await db
     .select()
     .from(categories)
@@ -38,7 +34,7 @@ async function findRoot(db: PostgresJsDatabase<any>, name: string) {
   return rows[0] ?? null;
 }
 
-async function findChild(db: PostgresJsDatabase<any>, parentId: string, name: string) {
+async function findChild(db: AppDb, parentId: string, name: string) {
   const rows = await db
     .select()
     .from(categories)
@@ -47,7 +43,7 @@ async function findChild(db: PostgresJsDatabase<any>, parentId: string, name: st
   return rows[0] ?? null;
 }
 
-async function insertRoot(db: PostgresJsDatabase<any>, name: string) {
+async function insertRoot(db: AppDb, name: string) {
   try {
     const [row] = await db.insert(categories).values({ name }).returning();
     return row!;
@@ -59,7 +55,7 @@ async function insertRoot(db: PostgresJsDatabase<any>, name: string) {
   }
 }
 
-async function insertChild(db: PostgresJsDatabase<any>, parentId: string, name: string) {
+async function insertChild(db: AppDb, parentId: string, name: string) {
   try {
     const [row] = await db.insert(categories).values({ name, parentId }).returning();
     return row!;
@@ -72,7 +68,7 @@ async function insertChild(db: PostgresJsDatabase<any>, parentId: string, name: 
 }
 
 export async function upsertCategoryPair(
-  db: PostgresJsDatabase<any>,
+  db: AppDb,
   parentRaw: string,
   childRaw: string,
 ): Promise<{ category: string; subcategory: string }> {
@@ -84,7 +80,7 @@ export async function upsertCategoryPair(
   return { category: parent.name, subcategory: child.name };
 }
 
-export async function renameCategory(db: PostgresJsDatabase<any>, id: string, rawName: string) {
+export async function renameCategory(db: AppDb, id: string, rawName: string) {
   const name = normalize(rawName);
   if (!name) throw new Error("invalid_category");
   const rows = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
@@ -108,7 +104,7 @@ export async function renameCategory(db: PostgresJsDatabase<any>, id: string, ra
   return updated!;
 }
 
-export async function createCategory(db: PostgresJsDatabase<any>, rawName: string, parentId: string | null) {
+export async function createCategory(db: AppDb, rawName: string, parentId: string | null) {
   const name = normalize(rawName);
   if (!name) throw new Error("invalid_category");
   if (parentId) {
@@ -123,7 +119,7 @@ export async function createCategory(db: PostgresJsDatabase<any>, rawName: strin
   return row!;
 }
 
-export async function deleteCategory(db: PostgresJsDatabase<any>, id: string) {
+export async function deleteCategory(db: AppDb, id: string) {
   const rows = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
   const row = rows[0];
   if (!row) return "missing" as const;
@@ -147,19 +143,19 @@ export async function deleteCategory(db: PostgresJsDatabase<any>, id: string) {
   return "ok" as const;
 }
 
-export async function categoryUsage(db: PostgresJsDatabase<any>, tree: CategoryNode[]) {
+export async function categoryUsage(db: AppDb, tree: CategoryNode[]) {
   const counts = await db
     .select({
       category: apps.category,
       subcategory: apps.subcategory,
-      count: sql<number>`count(*)::int`,
+      count: sql<number>`cast(count(*) as integer)`,
     })
     .from(apps)
     .groupBy(apps.category, apps.subcategory);
   const map = new Map<string, number>();
   for (const row of counts) {
-    map.set(`${row.category}\0${row.subcategory}`, row.count);
-    map.set(row.category, (map.get(row.category) ?? 0) + row.count);
+    map.set(`${row.category}\0${row.subcategory}`, Number(row.count));
+    map.set(row.category, (map.get(row.category) ?? 0) + Number(row.count));
   }
   return tree.map((root) => ({
     id: root.id,

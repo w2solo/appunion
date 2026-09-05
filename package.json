@@ -3,12 +3,18 @@
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
-    "dev": "pnpm --parallel --filter @appunions/api --filter @appunions/web --filter @appunions/worker dev",
+    "dev": "pnpm --parallel --filter @appunions/api --filter @appunions/web dev",
     "dev:api": "pnpm --filter @appunions/api dev",
     "dev:web": "pnpm --filter @appunions/web dev",
-    "dev:worker": "pnpm --filter @appunions/worker dev",
-    "db:migrate": "pnpm --filter @appunions/db migrate",
+    "db:migrate": "wrangler d1 migrations apply appunions --local",
+    "db:migrate:remote": "wrangler d1 migrations apply appunions --remote",
+    "cf:types": "wrangler types",
     "test": "pnpm --filter @appunions/api test",
-    "build": "pnpm -r build"
+    "build": "pnpm --filter @appunions/web build",
+    "deploy": "pnpm --filter @appunions/web build && wrangler d1 migrations apply appunions --remote && wrangler deploy"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "wrangler": "^4.34.0"
   }
 }

@@ -1,9 +1,8 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { appPlatforms, apps, getConfig } from "@appunions/db";
+import { appPlatforms, apps, getConfig, type AppDb } from "@appunions/db";
 import { type Platform } from "@appunions/shared";
-import { db } from "../db.js";
 import { pickRandom } from "./random.js";
-import { redis } from "../redis.js";
+import { cacheGet, cacheSet } from "../kv.js";
 
 type AppRow = typeof apps.$inferSelect;
 
@@ -20,7 +19,7 @@ export function listingDto(app: AppRow, platform: Platform, packageName: string)
   };
 }
 
-export async function hostHasPlatform(hostId: string, platform: Platform) {
+export async function hostHasPlatform(db: AppDb, hostId: string, platform: Platform) {
   const rows = await db
     .select({ id: appPlatforms.id })
     .from(appPlatforms)
@@ -29,9 +28,9 @@ export async function hostHasPlatform(hostId: string, platform: Platform) {
   return Boolean(rows[0]);
 }
 
-async function poolIds(platform: Platform, cacheSec: number) {
+async function poolIds(db: AppDb, kv: KVNamespace, platform: Platform, cacheSec: number) {
   const cacheKey = `pool:${platform}`;
-  const cached = await redis.get(cacheKey);
+  const cached = await cacheGet(kv, cacheKey);
   if (cached) return JSON.parse(cached) as string[];
   const rows = await db
     .select({ id: apps.id })
@@ -39,13 +38,19 @@ async function poolIds(platform: Platform, cacheSec: number) {
     .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
     .where(and(eq(appPlatforms.platform, platform), eq(apps.inRecommendPool, true)));
   const ids = rows.map((r) => r.id);
-  await redis.set(cacheKey, JSON.stringify(ids), "EX", cacheSec);
+  await cacheSet(kv, cacheKey, JSON.stringify(ids), cacheSec);
   return ids;
 }
 
-export async function recommendItems(hostId: string, platform: Platform, limit: number) {
+export async function recommendItems(
+  db: AppDb,
+  kv: KVNamespace,
+  hostId: string,
+  platform: Platform,
+  limit: number,
+) {
   const config = await getConfig(db);
-  const ids = (await poolIds(platform, config.recommendCacheSeconds)).filter((id) => id !== hostId);
+  const ids = (await poolIds(db, kv, platform, config.recommendCacheSeconds)).filter((id) => id !== hostId);
   const picked = pickRandom(ids, limit);
   const rows =
     picked.length === 0
@@ -65,7 +70,13 @@ export async function recommendItems(hostId: string, platform: Platform, limit: 
     .map((r) => listingDto(r.app, platform, r.packageName));
 }
 
-export async function listItems(hostId: string, platform: Platform, page: number, pageSize: number) {
+export async function listItems(
+  db: AppDb,
+  hostId: string,
+  platform: Platform,
+  page: number,
+  pageSize: number,
+) {
   const where = and(
     eq(appPlatforms.platform, platform),
     eq(apps.reviewStatus, "approved"),
@@ -74,11 +85,11 @@ export async function listItems(hostId: string, platform: Platform, page: number
     ne(apps.id, hostId),
   );
   const countRows = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({ n: sql<number>`cast(count(*) as integer)` })
     .from(apps)
     .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
     .where(where);
-  const total = countRows[0]?.n ?? 0;
+  const total = Number(countRows[0]?.n ?? 0);
   const rows = await db
     .select({ app: apps, packageName: appPlatforms.packageName })
     .from(apps)

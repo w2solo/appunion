@@ -1,7 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
-import { env } from "../env.js";
+import { flagEnabled } from "../context.js";
 
-const secret = new TextEncoder().encode(env.JWT_SECRET);
 export const ACCESS_COOKIE = "au_access";
 export const REFRESH_COOKIE = "au_refresh";
 
@@ -11,24 +10,28 @@ export type TokenPayload = {
   typ: "access" | "refresh";
 };
 
-export async function signAccess(sub: string, role: string) {
+function secret(env: Env) {
+  return new TextEncoder().encode(env.JWT_SECRET);
+}
+
+export async function signAccess(env: Env, sub: string, role: string) {
   return new SignJWT({ role, typ: "access" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(sub)
     .setExpirationTime("15m")
-    .sign(secret);
+    .sign(secret(env));
 }
 
-export async function signRefresh(sub: string, role: string) {
+export async function signRefresh(env: Env, sub: string, role: string) {
   return new SignJWT({ role, typ: "refresh" })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(sub)
     .setExpirationTime("30d")
-    .sign(secret);
+    .sign(secret(env));
 }
 
-export async function verifyToken(token: string): Promise<TokenPayload> {
-  const { payload } = await jwtVerify(token, secret);
+export async function verifyToken(env: Env, token: string): Promise<TokenPayload> {
+  const { payload } = await jwtVerify(token, secret(env));
   return {
     sub: String(payload.sub),
     role: String(payload.role),
@@ -36,11 +39,11 @@ export async function verifyToken(token: string): Promise<TokenPayload> {
   };
 }
 
-export function cookieOpts(maxAgeSec: number) {
+export function cookieOpts(env: Env, maxAgeSec: number) {
   return {
     httpOnly: true,
-    sameSite: "lax" as const,
-    secure: env.COOKIE_SECURE,
+    sameSite: "Lax" as const,
+    secure: flagEnabled(env.COOKIE_SECURE),
     path: "/",
     maxAge: maxAgeSec,
   };

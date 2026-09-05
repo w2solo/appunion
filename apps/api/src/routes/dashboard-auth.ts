@@ -1,15 +1,15 @@
-import type { FastifyInstance } from "fastify";
+import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { developers } from "@appunions/db/schema";
 import { ERROR_CODES, isSuperAdminEmail } from "@appunions/shared";
-import { db } from "../db.js";
-import { env } from "../env.js";
+import { getDb } from "../db.js";
+import { clientIp, flagEnabled, readJson, type AppEnv } from "../context.js";
 import { sendError } from "../errors.js";
 import { clearAuthCookies, mustUser, publicUser, requireUser, setAuthCookies } from "../lib/session.js";
 import { sendLoginCode } from "../lib/mail.js";
 import { consumeOtp, randomOtp, saveOtp } from "../lib/otp.js";
-import { rateLimit } from "../lib/redis-ops.js";
+import { rateLimit } from "../kv.js";
 
 const emailBody = z.object({ email: z.string().email() });
 const verifyBody = z.object({
@@ -17,51 +17,52 @@ const verifyBody = z.object({
   code: z.string().regex(/^\d{6}$/),
 });
 
-export async function dashboardAuthRoutes(app: FastifyInstance) {
-  app.post("/dashboard/auth/send-code", async (request, reply) => {
-    const parsed = emailBody.safeParse(request.body);
+export function dashboardAuthRoutes(app: Hono<AppEnv>) {
+  app.post("/dashboard/auth/send-code", async (c) => {
+    const parsed = emailBody.safeParse(await readJson(c));
     if (!parsed.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写有效邮箱");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请填写有效邮箱");
     }
     const email = parsed.data.email.toLowerCase();
-    if (!(await rateLimit(`sendcode:ip:${request.ip}`, 10, 3600))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "发送太频繁，请稍后再试");
+    if (!(await rateLimit(c.env.KV, `sendcode:ip:${clientIp(c)}`, 10, 3600))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "发送太频繁，请稍后再试");
     }
-    if (!(await rateLimit(`sendcode:${email}`, 1, 60))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "验证码已发送，请 1 分钟后再试");
+    if (!(await rateLimit(c.env.KV, `sendcode:${email}`, 1, 60))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "验证码已发送，请 1 分钟后再试");
     }
     const code = randomOtp();
-    await saveOtp(email, code);
+    await saveOtp(c.env.KV, c.env.JWT_SECRET, email, code);
     let emailed = false;
     try {
-      emailed = await sendLoginCode(email, code);
+      emailed = await sendLoginCode(c.env, email, code);
     } catch (err) {
-      request.log.error(err);
-      return sendError(reply, 500, ERROR_CODES.internal_error, "验证码发送失败");
+      console.error(err);
+      return sendError(c, 500, ERROR_CODES.internal_error, "验证码发送失败");
     }
     if (!emailed) {
-      request.log.info({ email }, `login code ${code}`);
+      console.log(`login code ${code}`, { email });
     }
-    return {
+    return c.json({
       sent: true,
       emailed,
-      ...(env.AUTH_ECHO_CODE && !emailed ? { devCode: code } : {}),
-    };
+      ...(flagEnabled(c.env.AUTH_ECHO_CODE) && !emailed ? { devCode: code } : {}),
+    });
   });
 
-  app.post("/dashboard/auth/verify", async (request, reply) => {
-    const parsed = verifyBody.safeParse(request.body);
+  app.post("/dashboard/auth/verify", async (c) => {
+    const parsed = verifyBody.safeParse(await readJson(c));
     const email = parsed.success ? parsed.data.email.toLowerCase() : "";
-    if (!(await rateLimit(`verify:${request.ip}`, 20, 600))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "试太多次，请稍后再试");
+    if (!(await rateLimit(c.env.KV, `verify:${clientIp(c)}`, 20, 600))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "试太多次，请稍后再试");
     }
     if (!parsed.success) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "请输入 6 位验证码");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请输入 6 位验证码");
     }
-    const ok = await consumeOtp(email, parsed.data.code);
+    const ok = await consumeOtp(c.env.KV, c.env.JWT_SECRET, email, parsed.data.code);
     if (!ok) {
-      return sendError(reply, 401, ERROR_CODES.unauthorized, "验证码不对或已过期");
+      return sendError(c, 401, ERROR_CODES.unauthorized, "验证码不对或已过期");
     }
+    const db = getDb(c.env.DB);
     let rows = await db.select().from(developers).where(eq(developers.email, email)).limit(1);
     let user = rows[0];
     if (!user) {
@@ -82,26 +83,27 @@ export async function dashboardAuthRoutes(app: FastifyInstance) {
         .returning();
       user = updated!;
     }
-    await setAuthCookies(reply, user.id, publicUser(user).role);
-    return publicUser(user);
+    await setAuthCookies(c, user.id, publicUser(user).role);
+    return c.json(publicUser(user));
   });
 
-  app.post("/dashboard/auth/logout", async (_request, reply) => {
-    clearAuthCookies(reply);
-    return { ok: true };
+  app.post("/dashboard/auth/logout", async (c) => {
+    clearAuthCookies(c);
+    return c.json({ ok: true });
   });
 
-  app.get("/dashboard/auth/me", { preHandler: requireUser() }, async (request) => {
-    const { id } = mustUser(request);
+  app.get("/dashboard/auth/me", requireUser, async (c) => {
+    const { id } = mustUser(c);
+    const db = getDb(c.env.DB);
     const rows = await db.select().from(developers).where(eq(developers.id, id)).limit(1);
     const user = rows[0];
     if (!user) {
-      return { id, email: "", role: "developer", superAdmin: false };
+      return c.json({ id, email: "", role: "developer", superAdmin: false });
     }
     if (isSuperAdminEmail(user.email) && user.role !== "admin") {
       await db.update(developers).set({ role: "admin" }).where(eq(developers.id, user.id));
       user.role = "admin";
     }
-    return publicUser(user);
+    return c.json(publicUser(user));
   });
 }

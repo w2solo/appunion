@@ -1,11 +1,11 @@
 import { inArray } from "drizzle-orm";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { appPlatforms } from "./schema.js";
+import type { AppDb } from "./types.js";
 
 export type AppPlatformPublic = { platform: string; packageName: string };
 
 export async function platformsForApps(
-  db: PostgresJsDatabase<any>,
+  db: AppDb,
   appIds: string[],
 ): Promise<Map<string, AppPlatformPublic[]>> {
   const map = new Map<string, AppPlatformPublic[]>();

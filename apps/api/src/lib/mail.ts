@@ -1,14 +1,4 @@
-import { env } from "../env.js";
-
-const SENDCLOUD_URL = "https://api.sendcloud.net/apiv2/mail/send";
-
-type SendCloudResponse = {
-  result?: boolean;
-  statusCode?: number;
-  message?: string;
-};
-
-export async function sendLoginCode(email: string, code: string) {
+export async function sendLoginCode(env: Env, email: string, code: string) {
   if (!env.SENDCLOUD_API_USER || !env.SENDCLOUD_API_KEY || !env.SENDCLOUD_FROM) {
     return false;
   }
@@ -23,19 +13,19 @@ export async function sendLoginCode(email: string, code: string) {
     apiUser: env.SENDCLOUD_API_USER,
     apiKey: env.SENDCLOUD_API_KEY,
     from: env.SENDCLOUD_FROM,
-    fromName: env.SENDCLOUD_FROM_NAME,
+    fromName: env.SENDCLOUD_FROM_NAME || "AppUnions",
     to: email,
     subject: "AppUnions 登录验证码",
     html,
     plain: `你的验证码是 ${code}，10 分钟内有效。如果不是你本人操作，请忽略这封邮件。`,
   });
 
-  const res = await fetch(SENDCLOUD_URL, {
+  const res = await fetch("https://api.sendcloud.net/apiv2/mail/send", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
-  const data = (await res.json()) as SendCloudResponse;
+  const data = (await res.json()) as { result?: boolean; statusCode?: number; message?: string };
   if (!res.ok || !data.result) {
     throw new Error(data.message || `SendCloud 发送失败 (${res.status})`);
   }

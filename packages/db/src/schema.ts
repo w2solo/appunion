@@ -1,37 +1,32 @@
 import { sql } from "drizzle-orm";
-import {
-  boolean,
-  customType,
-  date,
-  index,
-  integer,
-  pgTable,
-  primaryKey,
-  text,
-  timestamp,
-  uniqueIndex,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-const citext = customType<{ data: string }>({
-  dataType() {
-    return "citext";
+const id = (name = "id") => text(name).primaryKey().$defaultFn(() => crypto.randomUUID());
+const createdAt = (name = "created_at") =>
+  integer(name, { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date());
+const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
+const bool = (name: string, fallback = false) =>
+  integer(name, { mode: "boolean" }).notNull().default(fallback);
+
+export const developers = sqliteTable(
+  "developers",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    role: text("role").notNull().default("developer"),
+    createdAt: createdAt(),
   },
-});
+  (t) => ({
+    emailUidx: uniqueIndex("developers_email_uidx").on(t.email),
+  }),
+);
 
-export const developers = pgTable("developers", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  email: citext("email").notNull(),
-  passwordHash: text("password_hash").notNull(),
-  role: text("role").notNull().default("developer"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
-
-export const apps = pgTable(
+export const apps = sqliteTable(
   "apps",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    developerId: uuid("developer_id")
+    id: id(),
+    developerId: text("developer_id")
       .notNull()
       .references(() => developers.id),
     name: text("name").notNull(),
@@ -40,15 +35,15 @@ export const apps = pgTable(
     category: text("category").notNull(),
     subcategory: text("subcategory").notNull().default("其他"),
     reviewStatus: text("review_status").notNull().default("pending"),
-    pausedByDeveloper: boolean("paused_by_developer").notNull().default(false),
-    pausedByOps: boolean("paused_by_ops").notNull().default(false),
+    pausedByDeveloper: bool("paused_by_developer"),
+    pausedByOps: bool("paused_by_ops"),
     rejectedReason: text("rejected_reason"),
-    approvedAt: timestamp("approved_at", { withTimezone: true }),
-    inRecommendPool: boolean("in_recommend_pool").notNull().default(false),
+    approvedAt: timestamp("approved_at"),
+    inRecommendPool: bool("in_recommend_pool"),
     contributedImpressions7d: integer("contributed_impressions_7d").notNull().default(0),
     listSize: integer("list_size").notNull().default(10),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
   },
   (t) => ({
     poolIdx: index("apps_pool_idx").on(t.inRecommendPool),
@@ -56,16 +51,16 @@ export const apps = pgTable(
   }),
 );
 
-export const appPlatforms = pgTable(
+export const appPlatforms = sqliteTable(
   "app_platforms",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    appId: uuid("app_id")
+    id: id(),
+    appId: text("app_id")
       .notNull()
       .references(() => apps.id, { onDelete: "cascade" }),
     platform: text("platform").notNull(),
     packageName: text("package_name").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
   },
   (t) => ({
     appPlatformUidx: uniqueIndex("app_platforms_app_platform_uidx").on(t.appId, t.platform),
@@ -74,17 +69,17 @@ export const appPlatforms = pgTable(
   }),
 );
 
-export const apiKeys = pgTable(
+export const apiKeys = sqliteTable(
   "api_keys",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    appId: uuid("app_id")
+    id: id(),
+    appId: text("app_id")
       .notNull()
       .references(() => apps.id),
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    revokedAt: timestamp("revoked_at"),
   },
   (t) => ({
     hashUnique: uniqueIndex("api_keys_hash_uidx").on(t.keyHash),
@@ -94,32 +89,32 @@ export const apiKeys = pgTable(
   }),
 );
 
-export const appReviews = pgTable("app_reviews", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  appId: uuid("app_id")
+export const appReviews = sqliteTable("app_reviews", {
+  id: id(),
+  appId: text("app_id")
     .notNull()
     .references(() => apps.id),
-  actorId: uuid("actor_id")
+  actorId: text("actor_id")
     .notNull()
     .references(() => developers.id),
   action: text("action").notNull(),
   reason: text("reason"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: createdAt(),
 });
 
-export const impressionEvents = pgTable(
+export const impressionEvents = sqliteTable(
   "impression_events",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    hostAppId: uuid("host_app_id")
+    id: id(),
+    hostAppId: text("host_app_id")
       .notNull()
       .references(() => apps.id),
-    targetAppId: uuid("target_app_id")
+    targetAppId: text("target_app_id")
       .notNull()
       .references(() => apps.id),
-    clientId: uuid("client_id").notNull(),
-    idempotencyKey: uuid("idempotency_key").notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    clientId: text("client_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    occurredAt: createdAt("occurred_at"),
   },
   (t) => ({
     hostIdempotent: uniqueIndex("impressions_host_idem_uidx").on(t.hostAppId, t.idempotencyKey),
@@ -129,19 +124,19 @@ export const impressionEvents = pgTable(
   }),
 );
 
-export const clickEvents = pgTable(
+export const clickEvents = sqliteTable(
   "click_events",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
-    hostAppId: uuid("host_app_id")
+    id: id(),
+    hostAppId: text("host_app_id")
       .notNull()
       .references(() => apps.id),
-    targetAppId: uuid("target_app_id")
+    targetAppId: text("target_app_id")
       .notNull()
       .references(() => apps.id),
-    clientId: uuid("client_id").notNull(),
-    idempotencyKey: uuid("idempotency_key").notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull().defaultNow(),
+    clientId: text("client_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    occurredAt: createdAt("occurred_at"),
   },
   (t) => ({
     hostIdempotent: uniqueIndex("clicks_host_idem_uidx").on(t.hostAppId, t.idempotencyKey),
@@ -150,13 +145,13 @@ export const clickEvents = pgTable(
   }),
 );
 
-export const appDailyStats = pgTable(
+export const appDailyStats = sqliteTable(
   "app_daily_stats",
   {
-    appId: uuid("app_id")
+    appId: text("app_id")
       .notNull()
       .references(() => apps.id),
-    day: date("day").notNull(),
+    day: text("day").notNull(),
     impressionsReceived: integer("impressions_received").notNull().default(0),
     clicksReceived: integer("clicks_received").notNull().default(0),
     impressionsGiven: integer("impressions_given").notNull().default(0),
@@ -167,20 +162,20 @@ export const appDailyStats = pgTable(
   }),
 );
 
-export const categories = pgTable(
+export const categories = sqliteTable(
   "categories",
   {
-    id: uuid("id").primaryKey().defaultRandom(),
+    id: id(),
     name: text("name").notNull(),
-    parentId: uuid("parent_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    parentId: text("parent_id"),
+    createdAt: createdAt(),
   },
   (t) => ({
     parentIdx: index("categories_parent_idx").on(t.parentId),
   }),
 );
 
-export const platformConfig = pgTable("platform_config", {
+export const platformConfig = sqliteTable("platform_config", {
   id: integer("id").primaryKey().default(1),
   graceDays: integer("grace_days").notNull().default(7),
   reciprocityImpressions: integer("reciprocity_impressions").notNull().default(100),
@@ -192,15 +187,15 @@ export const platformConfig = pgTable("platform_config", {
   rateClicksPerMin: integer("rate_clicks_per_min").notNull().default(60),
 });
 
-export const anomalyFlags = pgTable("anomaly_flags", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  appId: uuid("app_id")
+export const anomalyFlags = sqliteTable("anomaly_flags", {
+  id: id(),
+  appId: text("app_id")
     .notNull()
     .references(() => apps.id),
   type: text("type").notNull(),
   window: text("window").notNull().default("7d"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  createdAt: createdAt(),
+  resolvedAt: timestamp("resolved_at"),
 });
 
 export type Developer = typeof developers.$inferSelect;

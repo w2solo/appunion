@@ -20,11 +20,19 @@ const schema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
-  SMTP_HOST: z.string().optional(),
-  SMTP_PORT: z.coerce.number().default(587),
-  SMTP_USER: z.string().optional(),
-  SMTP_PASS: z.string().optional(),
-  SMTP_FROM: z.string().optional(),
+  SENDCLOUD_API_USER: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  SENDCLOUD_API_KEY: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  SENDCLOUD_FROM: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined),
+  SENDCLOUD_FROM_NAME: z.string().default("AppUnions"),
   AUTH_ECHO_CODE: z
     .string()
     .optional()

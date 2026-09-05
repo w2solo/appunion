@@ -29,7 +29,7 @@ export function DocsIndex() {
     <>
       <h1 className="text-2xl font-semibold">接入步骤</h1>
       <ol className="list-decimal space-y-2 pl-5 text-sm leading-7">
-        <li>注册账号并创建应用（选对系统，商店链接必须能打开）。</li>
+        <li>用邮箱验证码登录（新邮箱会自动注册），然后创建应用（选对系统，商店链接必须能打开）。</li>
         <li>保存一次性展示的 API Key，离开后无法再看明文。</li>
         <li>等待运营审核。通过前调用开放接口会返回未通过。</li>
         <li>

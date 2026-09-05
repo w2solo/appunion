@@ -20,12 +20,14 @@
     "fastify": "^5.2.0",
     "ioredis": "^5.4.2",
     "jose": "^5.9.6",
+    "nodemailer": "^10.0.0",
     "postgres": "^3.4.5",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.10.5",
+    "@types/nodemailer": "^8.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }

@@ -1,4 +1,3 @@
-import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { developers, platformConfig } from "@appunions/db/schema";
 import { db } from "./db.js";
@@ -11,10 +10,9 @@ export async function seed() {
     .where(eq(developers.email, env.ADMIN_EMAIL))
     .limit(1);
   if (!existing[0]) {
-    const passwordHash = await bcrypt.hash(env.ADMIN_PASSWORD, 12);
     await db.insert(developers).values({
       email: env.ADMIN_EMAIL,
-      passwordHash,
+      passwordHash: "otp",
       role: "admin",
     });
     console.log(`seeded admin ${env.ADMIN_EMAIL}`);

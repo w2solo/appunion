@@ -21,7 +21,15 @@ const schema = z.object({
   S3_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
   ADMIN_EMAIL: z.string().email(),
-  ADMIN_PASSWORD: z.string().min(8),
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().default(587),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASS: z.string().optional(),
+  SMTP_FROM: z.string().optional(),
+  AUTH_ECHO_CODE: z
+    .string()
+    .optional()
+    .transform((v) => v !== "false"),
 });
 
 export const env = schema.parse(process.env);

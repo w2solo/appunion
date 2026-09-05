@@ -17,7 +17,7 @@ V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」�
 | --- | --- | --- |
 | 开发者后台 | 独立开发者 | Web，要登录 |
 | 接入文档 / 样式参考 | 开发者（可未登录阅读） | Web，公开页 |
-| 运营台 | 内部审核 | Web，同一站点，`role = admin` 才看见 |
+| 运营台 | 内部审核 | Web，同一站点，`role = admin` 或超管才看见 |
 | 开放 API | 宿主 App | HTTP JSON，`api_key`，无网页 |
 
 不做：带 UI 的客户端 SDK、C 端用户站、独立运营后台域名（V1 同一套前端即可）。
@@ -90,14 +90,15 @@ Web **不写业务规则**（是否在推荐池、去重、审核状态机都在
 | --- | --- | --- |
 | 未登录 | 无 cookie | 登录、注册、公开文档 |
 | 开发者 | `role = developer` | 我的应用、应用详情、数据、文档 |
-| 运营 | `role = admin` | 开发者能进的全部 + `/ops/*` |
+| 普通管理员 | `role = admin`，由超管标记已注册用户 | 开发者能进的全部 + `/ops/review` `/ops/anomalies` `/ops/config` |
+| 超级管理员 | 固定邮箱 `cmlanche@qq.com` | 普通管理员能进的全部 + `/ops/admins` |
 
 未登录访问 `/apps` → 跳 `/login?next=...`。开发者访问 `/ops` → 403 页（「没有权限」），不要伪装成 404。
 
 会话：
 
 1. 注册 / 登录成功，Fastify 写 httpOnly cookie（access + refresh）。
-2. 前端启动时 `GET /dashboard/auth/me`，拿到 `{ id, email, role }`。
+2. 前端启动时 `GET /dashboard/auth/me`，拿到 `{ id, email, role, superAdmin }`。
 3. 401 则清本地用户态，跳登录。
 4. 登出：`POST /dashboard/auth/logout`，跳 `/login`。
 
@@ -129,11 +130,12 @@ V1 不验证邮箱、不找回密码（与后端 D2 一致）。忘记密码文�
   /ops/apps/:id        审核详情
   /ops/anomalies       异常 CTR
   /ops/config          门槛参数
+  /ops/admins          管理员（仅超管）
 ```
 
 顶栏：产品名、文档、邮箱、退出。运营多一个「审核」。
 
-侧栏仅登录后出现：我的应用、接入文档。运营再加：审核、异常、参数。
+侧栏仅登录后出现：我的应用、接入文档。运营再加：审核、异常、设置。超管再加：管理员。
 
 ---
 
@@ -312,9 +314,15 @@ flowchart TD
 ### 7.10 运营：异常 `/ops/anomalies`、参数 `/ops/config`
 
 - 异常：App、类型、窗口、时间。操作可跳到该 App 审核详情去暂停。
-- 参数：观察天数、互惠曝光阈值、去重分钟、各限流。保存前二次确认「会立刻重算推荐池」。
+- 参数：观察天数、互惠曝光阈值、去重分钟、各限流。保存前二次确认「会立刻重算推荐池」。普通管理员可以改这些门槛。
 
 接口：`GET/PATCH /admin/config`，`GET /admin/anomalies`。
+
+### 7.11 运营：管理员 `/ops/admins`
+
+仅超级管理员可见。搜索已注册用户，把对方标成普通管理员或取消。不能改超级管理员本人。未注册邮箱不能直接加进来，对方必须先登录一次。
+
+接口：`GET /admin/users?q=`，`PATCH /admin/users/:id` `{ role }`。
 
 ---
 
@@ -346,7 +354,7 @@ apps/web
 
 | 项 | 说明 |
 | --- | --- |
-| `GET /dashboard/auth/me` | 返回当前用户，供刷新页面恢复会话 |
+| `GET /dashboard/auth/me` | 返回 `{ id, email, role, superAdmin }`，供刷新页面恢复会话 |
 | `GET /dashboard/apps` 摘要字段 | 见 7.3，减少列表页再打 N 次 stats |
 | 创建 App | 支持 `multipart/form-data` 一次提交资料+图标 |
 | 列表/详情的人话状态 | 后端给原始字段，**文案由前端拼**，方便改字不改 API |

@@ -45,8 +45,13 @@ export function AppLayout() {
               异常
             </NavLink>
             <NavLink className={navClass} to="/ops/config">
-              参数
+              设置
             </NavLink>
+            {user.superAdmin && (
+              <NavLink className={navClass} to="/ops/admins">
+                管理员
+              </NavLink>
+            )}
           </>
         )}
       </aside>

@@ -210,11 +210,11 @@ export function OpsAnomaliesPage() {
 }
 
 export function OpsConfigPage() {
-  const [cfg, setCfg] = useState<Record<string, number> | null>(null);
+  const [cfg, setCfg] = useState<OpsConfig | null>(null);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
-    api<Record<string, number>>("/admin/config").then(setCfg);
+    api<OpsConfig>("/admin/config").then(setCfg);
   }, []);
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -223,7 +223,7 @@ export function OpsConfigPage() {
     const fd = new FormData(e.currentTarget);
     const body: Record<string, number> = {};
     for (const [k, v] of fd.entries()) body[k] = Number(v);
-    const updated = await api<Record<string, number>>("/admin/config", {
+    const updated = await api<OpsConfig>("/admin/config", {
       method: "PATCH",
       body: JSON.stringify(body),
     });
@@ -233,7 +233,7 @@ export function OpsConfigPage() {
 
   if (!cfg) return <p className="text-muted">加载中…</p>;
 
-  const fields: [string, string][] = [
+  const fields: [keyof OpsConfig, string][] = [
     ["graceDays", "观察天数"],
     ["reciprocityImpressions", "互惠曝光门槛"],
     ["impressionDedupMinutes", "曝光去重分钟"],
@@ -245,18 +245,147 @@ export function OpsConfigPage() {
   ];
 
   return (
-    <div className="max-w-lg">
-      <h1 className="text-2xl font-semibold">门槛参数</h1>
-      <form className="mt-6 space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onSubmit(e)}>
+    <div className="max-w-lg space-y-6">
+      <h1 className="text-2xl font-semibold">设置</h1>
+      <form className="space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onSubmit(e)}>
+        <h2 className="font-medium">门槛参数</h2>
         {fields.map(([k, label]) => (
           <label key={k} className="block text-sm">
             {label}
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name={k} type="number" defaultValue={cfg[k]} />
           </label>
         ))}
-        <button className="rounded bg-brand px-4 py-2 text-white">保存</button>
-        {msg && <p className="text-sm text-green-700">{msg}</p>}
+        <button className="rounded bg-brand px-4 py-2 text-white">保存参数</button>
+        {msg && <p className="mt-2 text-sm text-green-700">{msg}</p>}
       </form>
     </div>
   );
 }
+
+type AdminUser = {
+  id: string;
+  email: string;
+  role: "admin" | "developer";
+  superAdmin: boolean;
+};
+
+export function OpsAdminsPage() {
+  const [q, setQ] = useState("");
+  const [items, setItems] = useState<AdminUser[]>([]);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function load(search = q) {
+    setError("");
+    const query = search.trim() ? `?q=${encodeURIComponent(search.trim())}` : "";
+    const data = await api<{ items: AdminUser[] }>(`/admin/users${query}`);
+    setItems(data.items);
+  }
+
+  useEffect(() => {
+    void load("").catch((e: Error) => setError(e.message));
+  }, []);
+
+  async function setRole(user: AdminUser, role: "admin" | "developer") {
+    const next = role === "admin" ? "设为普通管理员" : "取消管理员";
+    if (!confirm(`确定将 ${user.email} ${next}？`)) return;
+    setBusyId(user.id);
+    setError("");
+    try {
+      const updated = await api<AdminUser>(`/admin/users/${user.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ role }),
+      });
+      setItems((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">管理员</h1>
+      <p className="text-sm text-muted">
+        超级管理员固定为 <code className="rounded bg-slate-100 px-1">cmlanche@qq.com</code>
+        。只能把已经注册过的用户标成普通管理员；对方刷新页面或重新登录后即可看到审核台。普通管理员可以审核应用、改门槛参数，但不能再管理管理员。
+      </p>
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void load().catch((err: Error) => setError(err.message));
+        }}
+      >
+        <input
+          className="flex-1 rounded border border-line px-3 py-2 text-sm"
+          placeholder="搜索已注册邮箱"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button className="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">
+          搜索
+        </button>
+      </form>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {items.length === 0 ? (
+        <p className="text-muted">没有找到已注册用户</p>
+      ) : (
+        <table className="w-full rounded-lg bg-white text-left text-sm shadow-sm">
+          <thead className="text-muted">
+            <tr>
+              <th className="px-4 py-3">邮箱</th>
+              <th className="px-4 py-3">角色</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((user) => (
+              <tr key={user.id} className="border-t border-line">
+                <td className="px-4 py-3">{user.email}</td>
+                <td className="px-4 py-3">
+                  {user.superAdmin ? "超级管理员" : user.role === "admin" ? "普通管理员" : "开发者"}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {user.superAdmin ? (
+                    <span className="text-muted">固定</span>
+                  ) : user.role === "admin" ? (
+                    <button
+                      className="text-red-700 disabled:text-muted"
+                      disabled={busyId === user.id}
+                      onClick={() => void setRole(user, "developer")}
+                      type="button"
+                    >
+                      取消管理员
+                    </button>
+                  ) : (
+                    <button
+                      className="text-brand disabled:text-muted"
+                      disabled={busyId === user.id}
+                      onClick={() => void setRole(user, "admin")}
+                      type="button"
+                    >
+                      设为管理员
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+type OpsConfig = {
+  graceDays: number;
+  reciprocityImpressions: number;
+  impressionDedupMinutes: number;
+  recommendCacheSeconds: number;
+  rateRecommendPerMin: number;
+  rateListPerMin: number;
+  rateImpressionsPerMin: number;
+  rateClicksPerMin: number;
+};

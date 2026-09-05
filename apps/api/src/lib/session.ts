@@ -1,5 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { ERROR_CODES } from "@appunions/shared";
+import { eq } from "drizzle-orm";
+import { ERROR_CODES, isSuperAdminEmail } from "@appunions/shared";
+import { developers } from "@appunions/db";
+import { db } from "../db.js";
 import {
   ACCESS_COOKIE,
   REFRESH_COOKIE,
@@ -12,8 +15,18 @@ import { HttpError, sendError } from "../errors.js";
 
 declare module "fastify" {
   interface FastifyRequest {
-    authUser?: { id: string; role: string };
+    authUser?: { id: string; role: string; email?: string; superAdmin?: boolean };
   }
+}
+
+export function publicUser(user: { id: string; email: string; role: string }) {
+  const superAdmin = isSuperAdminEmail(user.email);
+  return {
+    id: user.id,
+    email: user.email,
+    role: (superAdmin ? "admin" : user.role) as "admin" | "developer",
+    superAdmin,
+  };
 }
 
 export async function setAuthCookies(reply: FastifyReply, id: string, role: string) {
@@ -64,12 +77,38 @@ export function requireUser() {
   };
 }
 
+async function loadDeveloper(id: string) {
+  const rows = await db.select().from(developers).where(eq(developers.id, id)).limit(1);
+  return rows[0] ?? null;
+}
+
 export function requireAdmin() {
   return async (request: FastifyRequest, reply: FastifyReply) => {
     await requireUser()(request, reply);
     if (reply.sent) return;
-    if (request.authUser?.role !== "admin") {
+    const user = await loadDeveloper(request.authUser!.id);
+    if (!user) {
+      return sendError(reply, 401, ERROR_CODES.unauthorized, "Please sign in");
+    }
+    const presented = publicUser(user);
+    if (presented.role !== "admin") {
       return sendError(reply, 403, ERROR_CODES.forbidden, "Admin only");
+    }
+    request.authUser = {
+      id: user.id,
+      role: presented.role,
+      email: user.email,
+      superAdmin: presented.superAdmin,
+    };
+  };
+}
+
+export function requireSuperAdmin() {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    await requireAdmin()(request, reply);
+    if (reply.sent) return;
+    if (!request.authUser?.superAdmin) {
+      return sendError(reply, 403, ERROR_CODES.forbidden, "只有超级管理员可以管理管理员");
     }
   };
 }

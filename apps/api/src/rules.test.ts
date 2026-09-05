@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
-import { isValidPackageName } from "@appunions/shared";
+import { isSuperAdminEmail, isValidPackageName } from "@appunions/shared";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 
@@ -72,5 +72,13 @@ describe("package names", () => {
     assert.equal(isValidPackageName("app"), false);
     assert.equal(isValidPackageName("com."), false);
     assert.equal(isValidPackageName(""), false);
+  });
+});
+
+describe("super admin", () => {
+  it("matches the hardcoded email case-insensitively", () => {
+    assert.equal(isSuperAdminEmail("cmlanche@qq.com"), true);
+    assert.equal(isSuperAdminEmail("  CMLANCHE@qq.com "), true);
+    assert.equal(isSuperAdminEmail("admin@appunions.local"), false);
   });
 });

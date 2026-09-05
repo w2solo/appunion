@@ -252,6 +252,7 @@ AND paused_by_ops = false
 | rate_recommend_per_min | 60 | |
 | rate_impressions_per_min | 120 | 按条数计，不是按请求计 |
 | rate_clicks_per_min | 60 | |
+| rate_list_per_min | 60 | |
 
 门槛是运营参数，改这一行即可，不用发版。
 
@@ -554,7 +555,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 
 ## 10. 运营 API（`/admin`）
 
-`role = admin` 的账号走同一登录接口，前端根据 role 显示审核台。V1 用环境变量 seed 第一个 admin。
+`role = admin` 的账号走同一登录接口，前端根据 `role` 和 `superAdmin` 显示运营台。超级管理员邮箱写死为 `cmlanche@qq.com`（seed 会确保该用户存在且 `role=admin`）。普通管理员由超管在后台搜索已注册用户后把 `developers.role` 改成 `admin`；登录时不再按邮箱名单覆盖角色。普通管理员可以审核和改门槛，不能调用用户管理接口。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -567,6 +568,8 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 | GET | `/admin/anomalies` | 异常 CTR 列表 |
 | GET | `/admin/config` | 读门槛参数 |
 | PATCH | `/admin/config` | 改门槛；改完立刻触发一次全量池重算 |
+| GET | `/admin/users?q=` | 超管：搜索/列出已注册用户 |
+| PATCH | `/admin/users/:id` | 超管：`{ role: "admin" \| "developer" }`，不能改超管本人 |
 
 拒绝后再通过：若 `approved_at` 已有值，**不重置观察期**（避免反复拒绝来刷观察期）。仅 `approved_at IS NULL` 时写入。若产品希望每次通过都重新观察，改这一行即可。
 

@@ -36,6 +36,12 @@ export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 export const ROLES = ["developer", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
+export const SUPER_ADMIN_EMAIL = "cmlanche@qq.com";
+
+export function isSuperAdminEmail(email: string): boolean {
+  return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
+
 export const ERROR_CODES = {
   invalid_params: "invalid_params",
   unauthorized: "unauthorized",

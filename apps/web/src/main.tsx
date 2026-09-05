@@ -12,7 +12,7 @@ import { NewAppPage } from "./pages/app-new";
 import { AppDetailPage } from "./pages/app-detail";
 import { AppStatsPage } from "./pages/app-stats";
 import { DocsApi, DocsIndex, DocsLayout, DocsRules, DocsUi } from "./pages/docs";
-import { OpsAnomaliesPage, OpsAppPage, OpsConfigPage, OpsReviewPage } from "./pages/ops";
+import { OpsAdminsPage, OpsAnomaliesPage, OpsAppPage, OpsConfigPage, OpsReviewPage } from "./pages/ops";
 
 function Forbidden() {
   return <p className="p-10">没有权限</p>;
@@ -75,6 +75,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth admin>
                   <OpsConfigPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/ops/admins"
+              element={
+                <RequireAuth superAdmin>
+                  <OpsAdminsPage />
                 </RequireAuth>
               }
             />

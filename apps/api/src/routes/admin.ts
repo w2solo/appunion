@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ilike, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   anomalyFlags,
@@ -12,10 +12,10 @@ import {
   refreshRecommendPool,
   syncAppPoolFlag,
 } from "@appunions/db";
-import { ERROR_CODES } from "@appunions/shared";
+import { ERROR_CODES, isSuperAdminEmail } from "@appunions/shared";
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
-import { mustUser, requireAdmin } from "../lib/session.js";
+import { mustUser, publicUser, requireAdmin, requireSuperAdmin } from "../lib/session.js";
 import { invalidatePoolCache } from "../lib/redis-ops.js";
 
 const configPatch = z.object({
@@ -239,5 +239,50 @@ export async function adminRoutes(app: FastifyInstance) {
     await refreshRecommendPool(db);
     await invalidatePoolCache();
     return updated;
+  });
+
+  app.get("/admin/users", { preHandler: requireSuperAdmin() }, async (request) => {
+    const raw = String((request.query as { q?: string }).q ?? "")
+      .trim()
+      .slice(0, 100);
+    const q = raw.replace(/[%_\\]/g, "");
+    const columns = {
+      id: developers.id,
+      email: developers.email,
+      role: developers.role,
+    };
+    const rows = q
+      ? await db
+          .select(columns)
+          .from(developers)
+          .where(ilike(developers.email, `%${q}%`))
+          .orderBy(desc(developers.createdAt))
+          .limit(50)
+      : await db
+          .select(columns)
+          .from(developers)
+          .orderBy(sql`case when ${developers.role} = 'admin' then 0 else 1 end`, desc(developers.createdAt))
+          .limit(50);
+    return { items: rows.map(publicUser) };
+  });
+
+  app.patch("/admin/users/:id", { preHandler: requireSuperAdmin() }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ role: z.enum(["admin", "developer"]) }).safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "参数无效");
+    }
+    const rows = await db.select().from(developers).where(eq(developers.id, id)).limit(1);
+    const target = rows[0];
+    if (!target) return sendError(reply, 404, ERROR_CODES.not_found, "用户不存在");
+    if (isSuperAdminEmail(target.email)) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "不能更改超级管理员");
+    }
+    const [updated] = await db
+      .update(developers)
+      .set({ role: parsed.data.role })
+      .where(eq(developers.id, id))
+      .returning();
+    return publicUser(updated!);
   });
 }

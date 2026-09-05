@@ -1,7 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api } from "./api";
 
-export type User = { id: string; email: string; role: "developer" | "admin" };
+export type User = {
+  id: string;
+  email: string;
+  role: "developer" | "admin";
+  superAdmin: boolean;
+};
 
 const Ctx = createContext<{
   user: User | null;
@@ -17,7 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function refresh() {
     try {
       const me = await api<User>("/dashboard/auth/me");
-      setUser(me);
+      setUser({ ...me, superAdmin: Boolean(me.superAdmin) });
     } catch {
       setUser(null);
     } finally {

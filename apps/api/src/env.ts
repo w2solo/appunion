@@ -20,7 +20,6 @@ const schema = z.object({
   S3_SECRET_KEY: z.string().min(1),
   S3_BUCKET: z.string().min(1),
   S3_PUBLIC_URL: z.string().url(),
-  ADMIN_EMAIL: z.string().email(),
   SMTP_HOST: z.string().optional(),
   SMTP_PORT: z.coerce.number().default(587),
   SMTP_USER: z.string().optional(),

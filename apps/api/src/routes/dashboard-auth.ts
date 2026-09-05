@@ -2,11 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { developers } from "@appunions/db/schema";
-import { ERROR_CODES } from "@appunions/shared";
+import { ERROR_CODES, isSuperAdminEmail } from "@appunions/shared";
 import { db } from "../db.js";
 import { env } from "../env.js";
 import { sendError } from "../errors.js";
-import { clearAuthCookies, mustUser, requireUser, setAuthCookies } from "../lib/session.js";
+import { clearAuthCookies, mustUser, publicUser, requireUser, setAuthCookies } from "../lib/session.js";
 import { sendLoginCode } from "../lib/mail.js";
 import { consumeOtp, randomOtp, saveOtp } from "../lib/otp.js";
 import { rateLimit } from "../lib/redis-ops.js";
@@ -67,12 +67,23 @@ export async function dashboardAuthRoutes(app: FastifyInstance) {
     if (!user) {
       const inserted = await db
         .insert(developers)
-        .values({ email, passwordHash: "otp", role: "developer" })
+        .values({
+          email,
+          passwordHash: "otp",
+          role: isSuperAdminEmail(email) ? "admin" : "developer",
+        })
         .returning();
       user = inserted[0]!;
+    } else if (isSuperAdminEmail(email) && user.role !== "admin") {
+      const [updated] = await db
+        .update(developers)
+        .set({ role: "admin" })
+        .where(eq(developers.id, user.id))
+        .returning();
+      user = updated!;
     }
-    await setAuthCookies(reply, user.id, user.role);
-    return { id: user.id, email: user.email, role: user.role };
+    await setAuthCookies(reply, user.id, publicUser(user).role);
+    return publicUser(user);
   });
 
   app.post("/dashboard/auth/logout", async (_request, reply) => {
@@ -85,8 +96,12 @@ export async function dashboardAuthRoutes(app: FastifyInstance) {
     const rows = await db.select().from(developers).where(eq(developers.id, id)).limit(1);
     const user = rows[0];
     if (!user) {
-      return { id, email: "", role: "developer" };
+      return { id, email: "", role: "developer", superAdmin: false };
     }
-    return { id: user.id, email: user.email, role: user.role };
+    if (isSuperAdminEmail(user.email) && user.role !== "admin") {
+      await db.update(developers).set({ role: "admin" }).where(eq(developers.id, user.id));
+      user.role = "admin";
+    }
+    return publicUser(user);
   });
 }

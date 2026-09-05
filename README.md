@@ -35,7 +35,7 @@ curl -s 'http://localhost:8787/v1/apps/recommend?platform=android' \
 前端静态资源和 API 部署到同一个 Worker，数据在 D1，缓存/验证码在 KV，图标在 R2：
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 说明见 [DEPLOY.md](DEPLOY.md)。

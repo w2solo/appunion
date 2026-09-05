@@ -47,7 +47,7 @@ npx wrangler secret put SENDCLOUD_FROM
 ## 1. 发布
 
 ```bash
-pnpm deploy
+pnpm run deploy
 ```
 
 这条命令会：构建 Web、对远程 D1 跑迁移、把 Worker（含静态资源）推上去。
@@ -91,13 +91,13 @@ pnpm cf:types
 pnpm db:migrate:remote
 
 # 发布
-pnpm deploy
+pnpm run deploy
 
 # 实时日志
 npx wrangler tail appunions
 ```
 
-改非密钥配置（例如 `AUTH_ECHO_CODE`）编辑 `wrangler.jsonc` 的 `vars` 再 `pnpm deploy`。改密钥用 `wrangler secret put`。
+改非密钥配置（例如 `AUTH_ECHO_CODE`）编辑 `wrangler.jsonc` 的 `vars` 再 `pnpm run deploy`。改密钥用 `wrangler secret put`。
 
 ## 5. 排查
 
@@ -107,6 +107,6 @@ npx wrangler tail appunions
 | 页面开得开，登录没验证码 | 没配 SendCloud secret，看 `wrangler tail` |
 | 登录成功但立刻掉线 | 用了 HTTP 却 `COOKIE_SECURE=true`；自定义域名要用 HTTPS |
 | 图标 404 | 确认 R2 桶 `appunions-icons` 存在，Worker binding 名为 `ICONS` |
-| `wrangler deploy` 找不到 assets | 先 `pnpm --filter @appunions/web build`，或直接 `pnpm deploy` |
+| `wrangler deploy` 找不到 assets | 先 `pnpm --filter @appunions/web build`，或直接 `pnpm run deploy` |
 
 本地开发用根目录 `.dev.vars`，与生产 secrets 互不影响。

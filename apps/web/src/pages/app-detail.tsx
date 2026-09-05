@@ -8,6 +8,7 @@ import {
   type Platform,
 } from "@appunions/shared";
 import { api } from "../shared/api";
+import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
 import { KeyModal } from "../shared/key-modal";
 import { platformLabel, statusLabel } from "../shared/status";
 import { CategoryFields } from "../shared/category-fields";
@@ -37,8 +38,12 @@ type AppDetail = {
 export function AppDetailPage() {
   const { id } = useParams();
   const [app, setApp] = useState<AppDetail | null>(null);
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const profile = useActionFeedback();
+  const creds = useActionFeedback();
+  const pause = useActionFeedback();
+  const copyId = useActionFeedback();
 
   async function load() {
     const data = await api<AppDetail>(`/dashboard/apps/${id}`);
@@ -46,16 +51,12 @@ export function AppDetailPage() {
   }
 
   useEffect(() => {
-    load().catch((e: Error) => setError(e.message));
+    load().catch((e: Error) => setLoadError(e.message));
   }, [id]);
-
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!app) return <p className="text-muted">加载中…</p>;
-
-  const s = statusLabel(app);
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!app) return;
     const fd = new FormData(e.currentTarget);
     const body = {
       name: String(fd.get("name")),
@@ -63,18 +64,18 @@ export function AppDetailPage() {
       category: String(fd.get("category")),
       subcategory: String(fd.get("subcategory")),
     };
-    try {
-      if (app?.reviewStatus === "rejected") {
-        await api(`/dashboard/apps/${id}`, { method: "PATCH", body: JSON.stringify(body) });
-        await api(`/dashboard/apps/${id}/resubmit`, { method: "POST" });
-      } else {
-        await api(`/dashboard/apps/${id}`, { method: "PATCH", body: JSON.stringify(body) });
-      }
+    const resubmit = app.reviewStatus === "rejected";
+    await profile.run(async () => {
+      await api(`/dashboard/apps/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+      if (resubmit) await api(`/dashboard/apps/${id}/resubmit`, { method: "POST" });
       await load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
-    }
+    }, resubmit ? "已保存并重新提交" : "已保存");
   }
+
+  if (loadError) return <p className="text-red-600">{loadError}</p>;
+  if (!app) return <p className="text-muted">加载中…</p>;
+
+  const s = statusLabel(app);
 
   return (
     <div className="space-y-6">
@@ -85,7 +86,7 @@ export function AppDetailPage() {
         </Link>
       </div>
       <StatusBar app={app} badge={s.text} />
-      <PlatformsSection app={app} onSaved={load} onError={setError} />
+      <PlatformsSection app={app} onSaved={load} />
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">资料</h2>
         <form className="mt-4 grid gap-3" onSubmit={(e) => void onSave(e)}>
@@ -102,37 +103,57 @@ export function AppDetailPage() {
             subcategory={app.subcategory}
             onChange={(next) => setApp({ ...app, category: next.category, subcategory: next.subcategory })}
           />
-          <button className="w-fit rounded bg-brand px-4 py-2 text-white" type="submit">
-            {app.reviewStatus === "rejected" ? "保存并重新提交" : "保存"}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="w-fit rounded bg-brand px-4 py-2 text-white disabled:opacity-50"
+              disabled={profile.busy}
+              type="submit"
+            >
+              {profile.busy
+                ? "保存中…"
+                : app.reviewStatus === "rejected"
+                  ? "保存并重新提交"
+                  : "保存"}
+            </button>
+            <ActionStatus error={profile.error} message={profile.message} />
+          </div>
         </form>
       </section>
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">凭证</h2>
         <p className="mt-2 text-sm">
           app_id：<code className="rounded bg-slate-100 px-1">{app.id}</code>
-          <button className="ml-2 text-brand" onClick={() => void navigator.clipboard.writeText(app.id)}>
-            复制
+          <button
+            className="ml-2 text-brand"
+            type="button"
+            onClick={() => void copyId.run(() => copyToClipboard(app.id), "已复制")}
+          >
+            {copyId.message ? "已复制" : "复制"}
           </button>
+          {copyId.error && <span className="ml-2 text-sm text-red-600">{copyId.error}</span>}
         </p>
         <p className="mt-2 text-sm">
           api_key：<code className="rounded bg-slate-100 px-1">{app.keyPrefix}****</code>
         </p>
         <p className="mt-2 text-xs text-muted">Authorization: Bearer &lt;你的密钥&gt;</p>
-        <button
-          className="mt-3 rounded border border-line px-3 py-1.5 text-sm"
-          onClick={() => {
-            if (!confirm("重置后旧密钥立刻失效，确定吗？")) return;
-            api<{ apiKey: string }>(`/dashboard/apps/${id}/api-key/rotate`, { method: "POST" })
-              .then((d) => {
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            className="rounded border border-line px-3 py-1.5 text-sm disabled:opacity-50"
+            disabled={creds.busy}
+            type="button"
+            onClick={() => {
+              if (!confirm("重置后旧密钥立刻失效，确定吗？")) return;
+              void creds.run(async () => {
+                const d = await api<{ apiKey: string }>(`/dashboard/apps/${id}/api-key/rotate`, { method: "POST" });
                 setApiKey(d.apiKey);
-                return load();
-              })
-              .catch((e: Error) => setError(e.message));
-          }}
-        >
-          重置密钥
-        </button>
+                await load();
+              }, "密钥已重置");
+            }}
+          >
+            {creds.busy ? "重置中…" : "重置密钥"}
+          </button>
+          <ActionStatus error={creds.error} message={apiKey ? "" : creds.message} />
+        </div>
       </section>
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">展示开关</h2>
@@ -140,28 +161,29 @@ export function AppDetailPage() {
           <p className="mt-2 text-sm text-red-700">运营已暂停本应用，开放接口不可用。</p>
         ) : app.pausedByDeveloper ? (
           <button
-            className="mt-3 rounded bg-brand px-3 py-2 text-sm text-white"
-            onClick={() =>
-              api(`/dashboard/apps/${id}/resume`, { method: "POST" })
-                .then(load)
-                .catch((e: Error) => setError(e.message))
-            }
+            className="mt-3 rounded bg-brand px-3 py-2 text-sm text-white disabled:opacity-50"
+            disabled={pause.busy}
+            type="button"
+            onClick={() => void pause.run(() => api(`/dashboard/apps/${id}/resume`, { method: "POST" }).then(load), "已恢复展示")}
           >
-            恢复展示
+            {pause.busy ? "处理中…" : "恢复展示"}
           </button>
         ) : (
           <button
-            className="mt-3 rounded border border-line px-3 py-2 text-sm"
+            className="mt-3 rounded border border-line px-3 py-2 text-sm disabled:opacity-50"
+            disabled={pause.busy}
+            type="button"
             onClick={() => {
               if (!confirm("暂停后不会出现在别人的列表里。开放接口仍可用。")) return;
-              api(`/dashboard/apps/${id}/pause`, { method: "POST" })
-                .then(load)
-                .catch((e: Error) => setError(e.message));
+              void pause.run(() => api(`/dashboard/apps/${id}/pause`, { method: "POST" }).then(load), "已暂停展示");
             }}
           >
-            暂停展示
+            {pause.busy ? "处理中…" : "暂停展示"}
           </button>
         )}
+        <div className="mt-2">
+          <ActionStatus error={pause.error} message={pause.message} />
+        </div>
       </section>
       {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
     </div>
@@ -171,13 +193,11 @@ export function AppDetailPage() {
 function PlatformsSection({
   app,
   onSaved,
-  onError,
 }: {
   app: AppDetail;
   onSaved: () => Promise<void>;
-  onError: (msg: string) => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  const saveFb = useActionFeedback();
   const [enabled, setEnabled] = useState<Record<Platform, boolean>>(() => {
     const next = { android: false, ios: false, harmonyos: false };
     for (const p of app.platforms) next[p.platform] = true;
@@ -201,8 +221,7 @@ function PlatformsSection({
   }, [app.platforms]);
 
   async function save() {
-    setBusy(true);
-    try {
+    await saveFb.run(async () => {
       const platforms = PLATFORMS.filter((p) => enabled[p]).map((p) => ({
         platform: p,
         packageName: names[p].trim(),
@@ -212,11 +231,7 @@ function PlatformsSection({
         body: JSON.stringify({ platforms }),
       });
       await onSaved();
-    } catch (err) {
-      onError(err instanceof Error ? err.message : "保存平台失败");
-    } finally {
-      setBusy(false);
-    }
+    }, "平台已保存");
   }
 
   return (
@@ -252,9 +267,17 @@ function PlatformsSection({
           </div>
         ))}
       </div>
-      <button className="mt-4 rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => void save()}>
-        {busy ? "保存中…" : "保存平台"}
-      </button>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button
+          className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50"
+          disabled={saveFb.busy}
+          type="button"
+          onClick={() => void save()}
+        >
+          {saveFb.busy ? "保存中…" : "保存平台"}
+        </button>
+        <ActionStatus error={saveFb.error} message={saveFb.message} />
+      </div>
       {app.platforms.length > 0 && (
         <p className="mt-3 text-xs text-muted">
           当前：{app.platforms.map((p) => `${platformLabel(p.platform)} ${p.packageName}`).join(" · ")}

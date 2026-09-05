@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
+import { ActionStatus, useActionFeedback } from "../shared/action-status";
 import { api } from "../shared/api";
 import { platformLabel, statusLabel } from "../shared/status";
 import { SuggestInput } from "../shared/category-fields";
@@ -87,29 +88,28 @@ export function OpsAppPage() {
   const { id } = useParams();
   const [app, setApp] = useState<AdminApp | null>(null);
   const [reason, setReason] = useState("");
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const action = useActionFeedback();
 
   function load() {
     return api<AdminApp>(`/admin/apps/${id}`).then(setApp);
   }
 
   useEffect(() => {
-    load().catch((e: Error) => setError(e.message));
+    load().catch((e: Error) => setLoadError(e.message));
   }, [id]);
 
-  async function act(path: string, body?: object) {
-    setError("");
-    try {
+  async function act(path: string, success: string, body?: object) {
+    await action.run(async () => {
       await api(`/admin/apps/${id}/${path}`, {
         method: "POST",
         body: body ? JSON.stringify(body) : undefined,
       });
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "失败");
-    }
+    }, success);
   }
 
+  if (loadError) return <p className="text-red-600">{loadError}</p>;
   if (!app) return <p className="text-muted">加载中…</p>;
   const s = statusLabel(app);
 
@@ -147,17 +147,21 @@ export function OpsAppPage() {
           ))}
         </ul>
       )}
-      {error && <p className="text-red-600">{error}</p>}
-      <div className="flex flex-wrap gap-2">
-        <button className="rounded bg-green-700 px-3 py-2 text-sm text-white" onClick={() => void act("approve")}>
-          通过
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          className="rounded bg-green-700 px-3 py-2 text-sm text-white disabled:opacity-50"
+          disabled={action.busy}
+          type="button"
+          onClick={() => void act("approve", "已通过")}
+        >
+          {action.busy ? "处理中…" : "通过"}
         </button>
         <form
           className="flex gap-2"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             if (!reason.trim()) return;
-            void act("reject", { reason });
+            void act("reject", "已拒绝", { reason });
           }}
         >
           <input
@@ -166,21 +170,31 @@ export function OpsAppPage() {
             value={reason}
             onChange={(e) => setReason(e.target.value)}
           />
-          <button className="rounded bg-red-700 px-3 py-2 text-sm text-white">拒绝</button>
+          <button className="rounded bg-red-700 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={action.busy}>
+            拒绝
+          </button>
         </form>
         <button
-          className="rounded border border-line px-3 py-2 text-sm"
+          className="rounded border border-line px-3 py-2 text-sm disabled:opacity-50"
+          disabled={action.busy}
+          type="button"
           onClick={() => {
             const r = prompt("暂停原因");
             if (!r) return;
-            void act("pause", { reason: r });
+            void act("pause", "已暂停", { reason: r });
           }}
         >
           运营暂停
         </button>
-        <button className="rounded border border-line px-3 py-2 text-sm" onClick={() => void act("resume")}>
+        <button
+          className="rounded border border-line px-3 py-2 text-sm disabled:opacity-50"
+          disabled={action.busy}
+          type="button"
+          onClick={() => void act("resume", "已恢复")}
+        >
           恢复
         </button>
+        <ActionStatus error={action.error} message={action.message} />
       </div>
       {app.reviews && app.reviews.length > 0 && (
         <ul className="text-sm text-muted">
@@ -223,7 +237,7 @@ export function OpsAnomaliesPage() {
 
 export function OpsConfigPage() {
   const [cfg, setCfg] = useState<OpsConfig | null>(null);
-  const [msg, setMsg] = useState("");
+  const save = useActionFeedback();
 
   useEffect(() => {
     api<OpsConfig>("/admin/config").then(setCfg);
@@ -235,12 +249,13 @@ export function OpsConfigPage() {
     const fd = new FormData(e.currentTarget);
     const body: Record<string, number> = {};
     for (const [k, v] of fd.entries()) body[k] = Number(v);
-    const updated = await api<OpsConfig>("/admin/config", {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
-    setCfg(updated);
-    setMsg("已保存并重算推荐池");
+    await save.run(async () => {
+      const updated = await api<OpsConfig>("/admin/config", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      setCfg(updated);
+    }, "已保存并重算推荐池");
   }
 
   if (!cfg) return <p className="text-muted">加载中…</p>;
@@ -267,8 +282,12 @@ export function OpsConfigPage() {
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name={k} type="number" defaultValue={cfg[k]} />
           </label>
         ))}
-        <button className="rounded bg-brand px-4 py-2 text-white">保存参数</button>
-        {msg && <p className="mt-2 text-sm text-green-700">{msg}</p>}
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="rounded bg-brand px-4 py-2 text-white disabled:opacity-50" disabled={save.busy}>
+            {save.busy ? "保存中…" : "保存参数"}
+          </button>
+          <ActionStatus error={save.error} message={save.message} />
+        </div>
       </form>
     </div>
   );
@@ -285,6 +304,7 @@ export function OpsAdminsPage() {
   const [q, setQ] = useState("");
   const [items, setItems] = useState<AdminUser[]>([]);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function load(search = q) {
@@ -303,12 +323,14 @@ export function OpsAdminsPage() {
     if (!confirm(`确定将 ${user.email} ${next}？`)) return;
     setBusyId(user.id);
     setError("");
+    setMessage("");
     try {
       const updated = await api<AdminUser>(`/admin/users/${user.id}`, {
         method: "PATCH",
         body: JSON.stringify({ role }),
       });
       setItems((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+      setMessage(role === "admin" ? `已将 ${user.email} 设为管理员` : "已取消管理员");
     } catch (e) {
       setError(e instanceof Error ? e.message : "保存失败");
     } finally {
@@ -340,7 +362,7 @@ export function OpsAdminsPage() {
           搜索
         </button>
       </form>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      <ActionStatus error={error} message={message} />
       {items.length === 0 ? (
         <p className="text-muted">没有找到已注册用户</p>
       ) : (
@@ -406,9 +428,10 @@ type CategoryNode = { id: string; name: string; appCount: number; children: { id
 
 export function OpsCategoriesPage() {
   const [items, setItems] = useState<CategoryNode[]>([]);
-  const [error, setError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [parentDraft, setParentDraft] = useState("");
   const [childDrafts, setChildDrafts] = useState<Record<string, string>>({});
+  const action = useActionFeedback();
 
   async function load() {
     const data = await api<{ items: CategoryNode[] }>("/admin/categories");
@@ -416,61 +439,49 @@ export function OpsCategoriesPage() {
   }
 
   useEffect(() => {
-    void load().catch((e: Error) => setError(e.message));
+    void load().catch((e: Error) => setLoadError(e.message));
   }, []);
 
   async function addParent() {
-    setError("");
-    try {
+    await action.run(async () => {
       await api("/admin/categories", {
         method: "POST",
         body: JSON.stringify({ name: parentDraft, parentId: null }),
       });
       setParentDraft("");
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "添加失败");
-    }
+    }, "已添加大分类");
   }
 
   async function addChild(parentId: string) {
     const name = (childDrafts[parentId] ?? "").trim();
     if (!name) return;
-    setError("");
-    try {
+    await action.run(async () => {
       await api("/admin/categories", {
         method: "POST",
         body: JSON.stringify({ name, parentId }),
       });
       setChildDrafts((prev) => ({ ...prev, [parentId]: "" }));
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "添加失败");
-    }
+    }, "已添加小分类");
   }
 
   async function rename(id: string, name: string) {
-    setError("");
-    try {
+    await action.run(async () => {
       await api(`/admin/categories/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ name }),
       });
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "保存失败");
-    }
+    }, "已保存");
   }
 
   async function remove(id: string) {
     if (!confirm("确定删除这个分类？")) return;
-    setError("");
-    try {
+    await action.run(async () => {
       await api(`/admin/categories/${id}`, { method: "DELETE" });
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "删除失败");
-    }
+    }, "已删除");
   }
 
   return (
@@ -479,7 +490,8 @@ export function OpsCategoriesPage() {
       <p className="text-sm text-muted">
         大分类下再分小分类。点输入框会提示已有名称，也可以直接输入新的。开发者创建应用时同样可以选已有或输入新分类。
       </p>
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {loadError && <p className="text-sm text-red-600">{loadError}</p>}
+      <ActionStatus error={action.error} message={action.message} />
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -495,8 +507,8 @@ export function OpsCategoriesPage() {
             onChange={setParentDraft}
           />
         </div>
-        <button className="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">
-          添加大分类
+        <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={action.busy} type="submit">
+          {action.busy ? "处理中…" : "添加大分类"}
         </button>
       </form>
       <div className="space-y-3">
@@ -557,7 +569,7 @@ export function OpsCategoriesPage() {
                   onChange={(value) => setChildDrafts((prev) => ({ ...prev, [group.id]: value }))}
                 />
               </div>
-              <button className="rounded border border-line px-3 py-2 text-sm" type="submit">
+              <button className="rounded border border-line px-3 py-2 text-sm disabled:opacity-50" disabled={action.busy} type="submit">
                 添加
               </button>
             </form>

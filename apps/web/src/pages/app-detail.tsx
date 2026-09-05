@@ -224,6 +224,9 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     await save.run(async () => {
+      if (!Number.isInteger(listSize) || listSize < LIST_SIZE_MIN || listSize > LIST_SIZE_MAX) {
+        throw new Error(`请输入 ${LIST_SIZE_MIN}–${LIST_SIZE_MAX} 的整数`);
+      }
       await api(`/dashboard/apps/${id}`, {
         method: "PATCH",
         body: JSON.stringify({ listSize }),
@@ -241,17 +244,15 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
       <form className="mt-4 max-w-xs space-y-3" onSubmit={(e) => void onSubmit(e)}>
         <label className="block text-sm">
           展示个数（{LIST_SIZE_MIN}–{LIST_SIZE_MAX}）
-          <select
+          <input
+            type="number"
+            min={LIST_SIZE_MIN}
+            max={LIST_SIZE_MAX}
+            step={1}
             className="mt-1 w-full rounded border border-line px-3 py-2"
-            value={listSize}
-            onChange={(e) => setListSize(Number(e.target.value))}
-          >
-            {Array.from({ length: LIST_SIZE_MAX - LIST_SIZE_MIN + 1 }, (_, i) => LIST_SIZE_MIN + i).map((n) => (
-              <option key={n} value={n}>
-                {n} 条
-              </option>
-            ))}
-          </select>
+            value={Number.isFinite(listSize) ? listSize : ""}
+            onChange={(e) => setListSize(e.target.value === "" ? Number.NaN : Number(e.target.value))}
+          />
         </label>
         <div className="flex flex-wrap items-center gap-3">
           <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={save.busy}>

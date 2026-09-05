@@ -1,4 +1,5 @@
 import { Link, Outlet } from "react-router-dom";
+import { IMPRESSION_BATCH_MAX, LIST_SIZE_MAX, LIST_SIZE_MIN } from "@appunions/shared";
 import { RecommendListPanel } from "../shared/recommend-list-panel";
 
 export function DocsLayout() {
@@ -56,7 +57,7 @@ export function DocsApi() {
       <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs">Authorization: Bearer auk_live_...</pre>
       <h2 className="mt-6 font-medium">GET /v1/apps/recommend</h2>
       <p className="text-sm">
-        Query：<code>platform</code>（必填，android / ios / harmonyos）。同端、排除自己、仅推荐池，等权随机。返回条数由控制台「配置」决定（1–10）。宿主必须已配置该端。「换一批」再请求一次。
+        Query：<code>platform</code>（必填，android / ios / harmonyos）。同端、排除自己、仅推荐池，等权随机。返回条数由控制台「配置」决定（{LIST_SIZE_MIN}–{LIST_SIZE_MAX}）。宿主必须已配置该端。「换一批」再请求一次。
       </p>
       <p className="text-sm">
         每条返回 <code>id, name, icon_url, tagline, category, subcategory, platform, package_name</code>。客户端用包名打开商店，例如 Android{" "}
@@ -70,7 +71,9 @@ export function DocsApi() {
     { "app_id": "uuid", "idempotency_key": "uuid", "visible": true }
   ]
 }`}</pre>
-      <p className="text-sm">client_id 为设备上持久化的匿名 UUID。visible 必须为 true。单次最多 10 条。</p>
+      <p className="text-sm">
+        client_id 为设备上持久化的匿名 UUID。visible 必须为 true。单次最多 {IMPRESSION_BATCH_MAX} 条。
+      </p>
       <h2 className="mt-6 font-medium">POST /v1/events/clicks</h2>
       <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs">{`{
   "platform": "android",

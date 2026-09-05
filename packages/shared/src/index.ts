@@ -70,12 +70,12 @@ export const TAGLINE_MAX_GRAPHEMES = 30;
 export const ICON_MAX_BYTES = 512 * 1024;
 export const PACKAGE_NAME_MAX = 255;
 export const LIST_SIZE_MIN = 1;
-export const LIST_SIZE_MAX = 10;
+export const LIST_SIZE_MAX = 50;
 export const LIST_SIZE_DEFAULT = 10;
 export const RECOMMEND_MAX = LIST_SIZE_MAX;
 export const LIST_DEFAULT_PAGE_SIZE = 20;
 export const LIST_MAX_PAGE_SIZE = 50;
-export const IMPRESSION_BATCH_MAX = 10;
+export const IMPRESSION_BATCH_MAX = LIST_SIZE_MAX;
 
 /** Android applicationId / iOS bundle id / HarmonyOS bundleName */
 export const PACKAGE_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_-]*)+$/;

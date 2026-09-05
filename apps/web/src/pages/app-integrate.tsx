@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { PLATFORMS, PLATFORM_LABELS, type Platform } from "@appunions/shared";
+import { IMPRESSION_BATCH_MAX, PLATFORMS, PLATFORM_LABELS, type Platform } from "@appunions/shared";
 import { api } from "../shared/api";
 import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
 import { RecommendListPanel } from "../shared/recommend-list-panel";
@@ -219,7 +219,7 @@ function buildIntegratePrompt({
 1. GET /v1/apps/recommend?platform=<当前端>
    从推荐池等权随机，返回 ${listSize} 条，不含自己。换一批 = 再请求一次。
 2. POST /v1/events/impressions
-   卡片进入可视区域后再报。visible 必须为 true。单次最多 10 条。
+   卡片进入可视区域后再报。visible 必须为 true。单次最多 ${IMPRESSION_BATCH_MAX} 条。
 3. POST /v1/events/clicks
    用户点击后再报，然后用返回的 package_name 打开对应应用商店。
 

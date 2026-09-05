@@ -16,7 +16,10 @@ import {
 import {
   ERROR_CODES,
   ICON_MAX_BYTES,
+  LIST_DEFAULT_PAGE_SIZE,
+  LIST_MAX_PAGE_SIZE,
   PLATFORMS,
+  RECOMMEND_MAX,
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
   isValidCategoryName,
@@ -25,6 +28,7 @@ import {
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
 import { generateApiKey } from "../lib/api-keys.js";
+import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import { mustUser, requireUser } from "../lib/session.js";
 import { invalidatePoolCache } from "../lib/redis-ops.js";
 import { uploadIcon } from "../s3.js";
@@ -434,6 +438,46 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       .where(eq(apps.id, id))
       .returning();
     return present(updated!);
+  });
+
+  app.get("/dashboard/apps/:id/preview/recommend", { preHandler: requireUser() }, async (request, reply) => {
+    const user = mustUser(request);
+    const { id } = request.params as { id: string };
+    const row = await ownedApp(user.id, id);
+    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+    const q = z
+      .object({
+        platform: z.enum(PLATFORMS),
+        limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).default(RECOMMEND_MAX),
+      })
+      .safeParse(request.query);
+    if (!q.success) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
+    }
+    if (!(await hostHasPlatform(id, q.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    const items = await recommendItems(id, q.data.platform, q.data.limit);
+    return { items };
+  });
+
+  app.get("/dashboard/apps/:id/preview/apps", { preHandler: requireUser() }, async (request, reply) => {
+    const user = mustUser(request);
+    const { id } = request.params as { id: string };
+    const row = await ownedApp(user.id, id);
+    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+    const q = z
+      .object({
+        platform: z.enum(PLATFORMS),
+        page: z.coerce.number().int().min(1).default(1),
+        page_size: z.coerce.number().int().min(1).max(LIST_MAX_PAGE_SIZE).default(LIST_DEFAULT_PAGE_SIZE),
+      })
+      .safeParse(request.query);
+    if (!q.success) return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
+    if (!(await hostHasPlatform(id, q.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    return listItems(id, q.data.platform, q.data.page, q.data.page_size);
   });
 
   app.get("/dashboard/apps/:id/stats", { preHandler: requireUser() }, async (request, reply) => {

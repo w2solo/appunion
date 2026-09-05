@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import {
   apiKeys,
@@ -22,14 +22,13 @@ import {
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
 import { hashApiKey } from "../lib/api-keys.js";
-import { pickRandom } from "../lib/random.js";
+import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import {
   impressionDedupSet,
   rateLimit,
   recentUnion,
   rememberRecent,
 } from "../lib/redis-ops.js";
-import { redis } from "../redis.js";
 import { bumpStats } from "../lib/stats.js";
 
 type Host = typeof apps.$inferSelect;
@@ -74,28 +73,6 @@ function isHost(v: Awaited<ReturnType<typeof hostFromKey>>): v is Host {
   return !("error" in v);
 }
 
-function dto(app: Host, platform: Platform, packageName: string) {
-  return {
-    id: app.id,
-    name: app.name,
-    icon_url: app.iconUrl,
-    tagline: app.tagline,
-    category: app.category,
-    subcategory: app.subcategory,
-    platform,
-    package_name: packageName,
-  };
-}
-
-async function hostHasPlatform(hostId: string, platform: Platform) {
-  const rows = await db
-    .select({ id: appPlatforms.id })
-    .from(appPlatforms)
-    .where(and(eq(appPlatforms.appId, hostId), eq(appPlatforms.platform, platform)))
-    .limit(1);
-  return Boolean(rows[0]);
-}
-
 async function listingFor(appId: string, platform: Platform) {
   const rows = await db
     .select()
@@ -103,20 +80,6 @@ async function listingFor(appId: string, platform: Platform) {
     .where(and(eq(appPlatforms.appId, appId), eq(appPlatforms.platform, platform)))
     .limit(1);
   return rows[0] ?? null;
-}
-
-async function poolIds(platform: Platform, cacheSec: number) {
-  const cacheKey = `pool:${platform}`;
-  const cached = await redis.get(cacheKey);
-  if (cached) return JSON.parse(cached) as string[];
-  const rows = await db
-    .select({ id: apps.id })
-    .from(apps)
-    .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
-    .where(and(eq(appPlatforms.platform, platform), eq(apps.inRecommendPool, true)));
-  const ids = rows.map((r) => r.id);
-  await redis.set(cacheKey, JSON.stringify(ids), "EX", cacheSec);
-  return ids;
 }
 
 export async function v1Routes(app: FastifyInstance) {
@@ -140,24 +103,7 @@ export async function v1Routes(app: FastifyInstance) {
       return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, limit } = q.data;
-    const ids = (await poolIds(platform, config.recommendCacheSeconds)).filter((id) => id !== host.id);
-    const picked = pickRandom(ids, limit);
-    const rows =
-      picked.length === 0
-        ? []
-        : await db
-            .select({ app: apps, packageName: appPlatforms.packageName })
-            .from(apps)
-            .innerJoin(
-              appPlatforms,
-              and(eq(appPlatforms.appId, apps.id), eq(appPlatforms.platform, platform)),
-            )
-            .where(inArray(apps.id, picked));
-    const byId = new Map(rows.map((r) => [r.app.id, r]));
-    const items = picked
-      .map((id) => byId.get(id))
-      .filter((r): r is (typeof rows)[number] => Boolean(r))
-      .map((r) => dto(r.app, platform, r.packageName));
+    const items = await recommendItems(host.id, platform, limit);
     await rememberRecent(
       host.id,
       items.map((i) => i.id),
@@ -184,37 +130,12 @@ export async function v1Routes(app: FastifyInstance) {
       return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, page, page_size } = q.data;
-    const where = and(
-      eq(appPlatforms.platform, platform),
-      eq(apps.reviewStatus, "approved"),
-      eq(apps.pausedByDeveloper, false),
-      eq(apps.pausedByOps, false),
-      ne(apps.id, host.id),
-    );
-    const countRows = await db
-      .select({ n: sql<number>`count(*)::int` })
-      .from(apps)
-      .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
-      .where(where);
-    const total = countRows[0]?.n ?? 0;
-    const rows = await db
-      .select({ app: apps, packageName: appPlatforms.packageName })
-      .from(apps)
-      .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
-      .where(where)
-      .orderBy(desc(apps.createdAt), desc(apps.id))
-      .limit(page_size)
-      .offset((page - 1) * page_size);
+    const data = await listItems(host.id, platform, page, page_size);
     await rememberRecent(
       host.id,
-      rows.map((r) => r.app.id),
+      data.items.map((i) => i.id),
     );
-    return {
-      items: rows.map((r) => dto(r.app, platform, r.packageName)),
-      page,
-      page_size,
-      total,
-    };
+    return data;
   });
 
   app.post("/v1/events/impressions", async (request, reply) => {

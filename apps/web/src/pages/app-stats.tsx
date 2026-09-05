@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { api } from "../shared/api";
 
@@ -26,6 +26,10 @@ type Stats = {
 
 export function AppStatsPage() {
   const { id } = useParams();
+  return <Navigate to={`/apps/${id}?tab=stats`} replace />;
+}
+
+export function AppStatsPanel({ id }: { id: string }) {
   const [range, setRange] = useState<"7d" | "30d">("7d");
   const [data, setData] = useState<Stats | null>(null);
   const [error, setError] = useState("");
@@ -41,12 +45,6 @@ export function AppStatsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">数据</h1>
-        <Link className="text-sm text-brand" to={`/apps/${id}`}>
-          返回详情
-        </Link>
-      </div>
       <div className="mb-4 flex gap-2 text-sm">
         <button className={range === "7d" ? "font-semibold" : "text-muted"} onClick={() => setRange("7d")}>
           7 天

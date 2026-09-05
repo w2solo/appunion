@@ -33,5 +33,10 @@ export function useActionFeedback() {
     }
   }
 
-  return { error, message, busy, run };
+  function reset() {
+    setError("");
+    setMessage("");
+  }
+
+  return { error, message, busy, run, reset };
 }

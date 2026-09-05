@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import {
   PACKAGE_NAME_HINTS,
   PLATFORMS,
@@ -12,6 +12,8 @@ import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/acti
 import { KeyModal } from "../shared/key-modal";
 import { platformLabel, statusLabel } from "../shared/status";
 import { CategoryFields } from "../shared/category-fields";
+import { AppStatsPanel } from "./app-stats";
+import { AppIntegratePanel } from "./app-integrate";
 
 type AppPlatform = { platform: Platform; packageName: string };
 
@@ -35,15 +37,26 @@ type AppDetail = {
   keyPrefix: string;
 };
 
+const TABS = [
+  { id: "info", label: "基本信息" },
+  { id: "stats", label: "数据" },
+  { id: "keys", label: "密钥" },
+  { id: "integrate", label: "接入" },
+] as const;
+
+type Tab = (typeof TABS)[number]["id"];
+
+function parseTab(value: string | null): Tab {
+  return TABS.some((t) => t.id === value) ? (value as Tab) : "info";
+}
+
 export function AppDetailPage() {
   const { id } = useParams();
+  const [params, setParams] = useSearchParams();
+  const tab = parseTab(params.get("tab"));
   const [app, setApp] = useState<AppDetail | null>(null);
   const [loadError, setLoadError] = useState("");
   const [apiKey, setApiKey] = useState<string | null>(null);
-  const profile = useActionFeedback();
-  const creds = useActionFeedback();
-  const pause = useActionFeedback();
-  const copyId = useActionFeedback();
 
   async function load() {
     const data = await api<AppDetail>(`/dashboard/apps/${id}`);
@@ -54,9 +67,62 @@ export function AppDetailPage() {
     load().catch((e: Error) => setLoadError(e.message));
   }, [id]);
 
+  function setTab(next: Tab) {
+    setParams(next === "info" ? {} : { tab: next }, { replace: true });
+  }
+
+  if (loadError) return <p className="text-red-600">{loadError}</p>;
+  if (!app || !id) return <p className="text-muted">加载中…</p>;
+
+  const s = statusLabel(app);
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">{app.name}</h1>
+        <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
+      </div>
+      <StatusBar app={app} />
+      <nav className="flex gap-1 border-b border-line">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm ${
+              tab === t.id ? "border-brand font-medium text-brand" : "border-transparent text-muted"
+            }`}
+            type="button"
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+      {tab === "info" && <InfoTab app={app} setApp={setApp} onSaved={load} />}
+      {tab === "stats" && <AppStatsPanel id={id} />}
+      {tab === "keys" && <KeysTab app={app} apiKey={apiKey} setApiKey={setApiKey} onRotated={load} />}
+      {tab === "integrate" && (
+        <AppIntegratePanel appId={app.id} appName={app.name} platforms={app.platforms} />
+      )}
+      {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
+    </div>
+  );
+}
+
+function InfoTab({
+  app,
+  setApp,
+  onSaved,
+}: {
+  app: AppDetail;
+  setApp: (app: AppDetail) => void;
+  onSaved: () => Promise<void>;
+}) {
+  const profile = useActionFeedback();
+  const pause = useActionFeedback();
+  const { id } = useParams();
+
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!app) return;
     const fd = new FormData(e.currentTarget);
     const body = {
       name: String(fd.get("name")),
@@ -68,25 +134,13 @@ export function AppDetailPage() {
     await profile.run(async () => {
       await api(`/dashboard/apps/${id}`, { method: "PATCH", body: JSON.stringify(body) });
       if (resubmit) await api(`/dashboard/apps/${id}/resubmit`, { method: "POST" });
-      await load();
+      await onSaved();
     }, resubmit ? "已保存并重新提交" : "已保存");
   }
 
-  if (loadError) return <p className="text-red-600">{loadError}</p>;
-  if (!app) return <p className="text-muted">加载中…</p>;
-
-  const s = statusLabel(app);
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{app.name}</h1>
-        <Link className="text-sm text-brand" to={`/apps/${app.id}/stats`}>
-          查看数据
-        </Link>
-      </div>
-      <StatusBar app={app} badge={s.text} />
-      <PlatformsSection app={app} onSaved={load} />
+      <PlatformsSection app={app} onSaved={onSaved} />
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">资料</h2>
         <form className="mt-4 grid gap-3" onSubmit={(e) => void onSave(e)}>
@@ -120,42 +174,6 @@ export function AppDetailPage() {
         </form>
       </section>
       <section className="rounded-lg bg-white p-6 shadow-sm">
-        <h2 className="font-medium">凭证</h2>
-        <p className="mt-2 text-sm">
-          app_id：<code className="rounded bg-slate-100 px-1">{app.id}</code>
-          <button
-            className="ml-2 text-brand"
-            type="button"
-            onClick={() => void copyId.run(() => copyToClipboard(app.id), "已复制")}
-          >
-            {copyId.message ? "已复制" : "复制"}
-          </button>
-          {copyId.error && <span className="ml-2 text-sm text-red-600">{copyId.error}</span>}
-        </p>
-        <p className="mt-2 text-sm">
-          api_key：<code className="rounded bg-slate-100 px-1">{app.keyPrefix}****</code>
-        </p>
-        <p className="mt-2 text-xs text-muted">Authorization: Bearer &lt;你的密钥&gt;</p>
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            className="rounded border border-line px-3 py-1.5 text-sm disabled:opacity-50"
-            disabled={creds.busy}
-            type="button"
-            onClick={() => {
-              if (!confirm("重置后旧密钥立刻失效，确定吗？")) return;
-              void creds.run(async () => {
-                const d = await api<{ apiKey: string }>(`/dashboard/apps/${id}/api-key/rotate`, { method: "POST" });
-                setApiKey(d.apiKey);
-                await load();
-              }, "密钥已重置");
-            }}
-          >
-            {creds.busy ? "重置中…" : "重置密钥"}
-          </button>
-          <ActionStatus error={creds.error} message={apiKey ? "" : creds.message} />
-        </div>
-      </section>
-      <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">展示开关</h2>
         {app.pausedByOps ? (
           <p className="mt-2 text-sm text-red-700">运营已暂停本应用，开放接口不可用。</p>
@@ -164,7 +182,7 @@ export function AppDetailPage() {
             className="mt-3 rounded bg-brand px-3 py-2 text-sm text-white disabled:opacity-50"
             disabled={pause.busy}
             type="button"
-            onClick={() => void pause.run(() => api(`/dashboard/apps/${id}/resume`, { method: "POST" }).then(load), "已恢复展示")}
+            onClick={() => void pause.run(() => api(`/dashboard/apps/${id}/resume`, { method: "POST" }).then(onSaved), "已恢复展示")}
           >
             {pause.busy ? "处理中…" : "恢复展示"}
           </button>
@@ -175,7 +193,7 @@ export function AppDetailPage() {
             type="button"
             onClick={() => {
               if (!confirm("暂停后不会出现在别人的列表里。开放接口仍可用。")) return;
-              void pause.run(() => api(`/dashboard/apps/${id}/pause`, { method: "POST" }).then(load), "已暂停展示");
+              void pause.run(() => api(`/dashboard/apps/${id}/pause`, { method: "POST" }).then(onSaved), "已暂停展示");
             }}
           >
             {pause.busy ? "处理中…" : "暂停展示"}
@@ -185,8 +203,65 @@ export function AppDetailPage() {
           <ActionStatus error={pause.error} message={pause.message} />
         </div>
       </section>
-      {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
     </div>
+  );
+}
+
+function KeysTab({
+  app,
+  apiKey,
+  setApiKey,
+  onRotated,
+}: {
+  app: AppDetail;
+  apiKey: string | null;
+  setApiKey: (key: string | null) => void;
+  onRotated: () => Promise<void>;
+}) {
+  const { id } = useParams();
+  const creds = useActionFeedback();
+  const copyId = useActionFeedback();
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow-sm">
+      <h2 className="font-medium">密钥</h2>
+      <p className="mt-2 text-sm text-muted">
+        客户端用 Bearer 令牌调开放接口。明文只在创建或重置时展示一次，离开后无法再看。
+      </p>
+      <p className="mt-4 text-sm">
+        app_id：<code className="rounded bg-slate-100 px-1">{app.id}</code>
+        <button
+          className="ml-2 text-brand"
+          type="button"
+          onClick={() => void copyId.run(() => copyToClipboard(app.id), "已复制")}
+        >
+          {copyId.message ? "已复制" : "复制"}
+        </button>
+        {copyId.error && <span className="ml-2 text-sm text-red-600">{copyId.error}</span>}
+      </p>
+      <p className="mt-2 text-sm">
+        api_key：<code className="rounded bg-slate-100 px-1">{app.keyPrefix}****</code>
+      </p>
+      <p className="mt-2 text-xs text-muted">Authorization: Bearer &lt;你的密钥&gt;</p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          className="rounded border border-line px-3 py-1.5 text-sm disabled:opacity-50"
+          disabled={creds.busy}
+          type="button"
+          onClick={() => {
+            if (!confirm("重置后旧密钥立刻失效，确定吗？")) return;
+            void creds.run(async () => {
+              const d = await api<{ apiKey: string }>(`/dashboard/apps/${id}/api-key/rotate`, { method: "POST" });
+              setApiKey(d.apiKey);
+              await onRotated();
+            }, "密钥已重置");
+          }}
+        >
+          {creds.busy ? "重置中…" : "重置密钥"}
+        </button>
+        <ActionStatus error={creds.error} message={apiKey ? "" : creds.message} />
+      </div>
+    </section>
   );
 }
 
@@ -287,10 +362,10 @@ function PlatformsSection({
   );
 }
 
-function StatusBar({ app, badge }: { app: AppDetail; badge: string }) {
+function StatusBar({ app }: { app: AppDetail }) {
   let text = "";
   if (app.reviewStatus === "pending") {
-    text = "审核中，通过前开放接口会返回未通过。你可以先按文档写代码。";
+    text = "审核中，通过前开放接口会返回未通过。你可以先到「接入」用后台预览写 UI。";
   } else if (app.reviewStatus === "rejected") {
     text = `已拒绝：${app.rejectedReason ?? ""}`;
   } else if (app.pausedByOps) {
@@ -306,7 +381,6 @@ function StatusBar({ app, badge }: { app: AppDetail; badge: string }) {
   }
   return (
     <div className="rounded-lg border border-line bg-white px-4 py-3 text-sm">
-      <span className="mr-2 rounded bg-slate-100 px-2 py-0.5 text-xs">{badge}</span>
       {text}
     </div>
   );

@@ -47,6 +47,9 @@ export function AppLayout() {
             <NavLink className={navClass} to="/ops/config">
               设置
             </NavLink>
+            <NavLink className={navClass} to="/ops/categories">
+              分类
+            </NavLink>
             {user.superAdmin && (
               <NavLink className={navClass} to="/ops/admins">
                 管理员

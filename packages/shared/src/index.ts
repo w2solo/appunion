@@ -7,19 +7,20 @@ export const PLATFORM_LABELS: Record<Platform, string> = {
   harmonyos: "鸿蒙",
 };
 
-export const CATEGORIES = [
-  "tools",
-  "productivity",
-  "content",
-  "social",
-  "game",
-  "education",
-  "lifestyle",
-  "other",
-] as const;
-export type Category = (typeof CATEGORIES)[number];
+export const CATEGORY_NAME_MAX = 20;
 
-export const CATEGORY_LABELS: Record<Category, string> = {
+export const DEFAULT_CATEGORY_TREE: { name: string; children: string[] }[] = [
+  { name: "工具", children: ["系统工具", "文件管理", "清理加速", "输入法", "浏览器", "扫描识别", "其他"] },
+  { name: "效率", children: ["笔记", "待办", "日历", "办公文档", "邮箱", "密码管理", "其他"] },
+  { name: "内容", children: ["新闻资讯", "阅读", "视频", "音频播客", "图文社区", "其他"] },
+  { name: "社交", children: ["即时通讯", "社区论坛", "约会交友", "其他"] },
+  { name: "游戏", children: ["休闲", "益智", "动作", "策略", "角色扮演", "其他"] },
+  { name: "教育", children: ["语言学习", "考试备考", "儿童教育", "技能培训", "其他"] },
+  { name: "生活", children: ["购物", "出行导航", "美食", "健康运动", "天气", "理财", "其他"] },
+  { name: "其他", children: ["未分类"] },
+];
+
+export const LEGACY_CATEGORY_LABELS: Record<string, string> = {
   tools: "工具",
   productivity: "效率",
   content: "内容",
@@ -29,6 +30,15 @@ export const CATEGORY_LABELS: Record<Category, string> = {
   lifestyle: "生活",
   other: "其他",
 };
+
+export function normalizeCategoryName(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+export function isValidCategoryName(value: string): boolean {
+  const name = normalizeCategoryName(value);
+  return name.length > 0 && graphemeLength(name) <= CATEGORY_NAME_MAX;
+}
 
 export const REVIEW_STATUSES = ["pending", "approved", "rejected"] as const;
 export type ReviewStatus = (typeof REVIEW_STATUSES)[number];

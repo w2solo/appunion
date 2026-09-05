@@ -81,6 +81,7 @@ function dto(app: Host, platform: Platform, packageName: string) {
     icon_url: app.iconUrl,
     tagline: app.tagline,
     category: app.category,
+    subcategory: app.subcategory,
     platform,
     package_name: packageName,
   };

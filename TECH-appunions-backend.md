@@ -143,7 +143,8 @@ erDiagram
 | name | text | |
 | icon_url | text | 存储完成后的 HTTPS URL |
 | tagline | text | 一句话，最长 30 汉字（按 Unicode 字素校验） |
-| category | text | 预设枚举 |
+| category | text | 大分类名称 |
+| subcategory | text | 小分类名称 |
 | review_status | text | `pending` / `approved` / `rejected` |
 | paused_by_developer | bool | 默认 false |
 | paused_by_ops | bool | 默认 false |
@@ -256,7 +257,7 @@ AND paused_by_ops = false
 
 门槛是运营参数，改这一行即可，不用发版。
 
-**预设分类**：代码里常量，不单独建表。V1 建议：`tools` / `productivity` / `content` / `social` / `game` / `education` / `lifestyle` / `other`。
+**分类**：`categories` 表存两级（`parent_id` 为空是大分类）。应用上存名称 `category` / `subcategory`。运营可在「分类」页增删改；创建应用时点输入框提示已有项，也可输入还不存在的分类，保存时写入目录。
 
 ---
 
@@ -354,7 +355,8 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
   "name": "...",
   "icon_url": "https://...",
   "tagline": "...",
-  "category": "tools",
+  "category": "工具",
+  "subcategory": "文件管理",
   "platform": "android",
   "package_name": "com.company.app"
 }
@@ -515,7 +517,8 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 | POST | `/dashboard/auth/register` | 邮箱、密码；V1 先不强制邮箱验证（决策 D2） |
 | POST | `/dashboard/auth/login` | |
 | POST | `/dashboard/auth/logout` | |
-| GET | `/dashboard/auth/me` | 当前用户 `{ id, email, role }`，Web 刷新页面用 |
+| GET | `/dashboard/auth/me` | 当前用户 `{ id, email, role, superAdmin }`，Web 刷新页面用 |
+| GET | `/dashboard/categories` | 两级分类目录，供创建应用时提示 |
 | GET | `/dashboard/apps` | 我的 App 列表。每条带摘要：`icon_url, platforms, review_status, paused_*, in_recommend_pool, grace_days_left, impressions_received_7d` |
 | POST | `/dashboard/apps` | 创建，`multipart`（名称、描述、分类、图标）。生成 api_key，**响应里明文只出现这一次** |
 | GET | `/dashboard/apps/:id` | 资料 + `platforms` + 审核状态 + key_prefix + 池状态 + 门槛缺口 |
@@ -568,6 +571,10 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 | GET | `/admin/anomalies` | 异常 CTR 列表 |
 | GET | `/admin/config` | 读门槛参数 |
 | PATCH | `/admin/config` | 改门槛；改完立刻触发一次全量池重算 |
+| GET | `/admin/categories` | 分类树（含应用占用数） |
+| POST | `/admin/categories` | `{ name, parentId? }` 新增大类或小类 |
+| PATCH | `/admin/categories/:id` | 改名，并同步已有应用上的名称 |
+| DELETE | `/admin/categories/:id` | 未使用才可删；大类需先删小类 |
 | GET | `/admin/users?q=` | 超管：搜索/列出已注册用户 |
 | PATCH | `/admin/users/:id` | 超管：`{ role: "admin" \| "developer" }`，不能改超管本人 |
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
-import { isSuperAdminEmail, isValidPackageName } from "@appunions/shared";
+import { isSuperAdminEmail, isValidCategoryName, isValidPackageName, normalizeCategoryName } from "@appunions/shared";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 
@@ -80,5 +80,14 @@ describe("super admin", () => {
     assert.equal(isSuperAdminEmail("cmlanche@qq.com"), true);
     assert.equal(isSuperAdminEmail("  CMLANCHE@qq.com "), true);
     assert.equal(isSuperAdminEmail("admin@appunions.local"), false);
+  });
+});
+
+describe("categories", () => {
+  it("normalizes and caps names", () => {
+    assert.equal(normalizeCategoryName("  文件  管理 "), "文件 管理");
+    assert.equal(isValidCategoryName("文件管理"), true);
+    assert.equal(isValidCategoryName(""), false);
+    assert.equal(isValidCategoryName("   "), false);
   });
 });

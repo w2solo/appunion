@@ -1,8 +1,9 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORIES, CATEGORY_LABELS, graphemeLength } from "@appunions/shared";
+import { graphemeLength } from "@appunions/shared";
 import { api } from "../shared/api";
 import { KeyModal } from "../shared/key-modal";
+import { CategoryFields } from "../shared/category-fields";
 
 export function NewAppPage() {
   const nav = useNavigate();
@@ -11,6 +12,8 @@ export function NewAppPage() {
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [appId, setAppId] = useState("");
   const [tagline, setTagline] = useState("");
+  const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -53,16 +56,14 @@ export function NewAppPage() {
             placeholder="列表卡片上展示"
           />
         </label>
-        <label className="block text-sm">
-          分类
-          <select className="mt-1 w-full rounded border border-line px-3 py-2" name="category" required>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>
-                {CATEGORY_LABELS[c]}
-              </option>
-            ))}
-          </select>
-        </label>
+        <CategoryFields
+          category={category}
+          subcategory={subcategory}
+          onChange={(next) => {
+            setCategory(next.category);
+            setSubcategory(next.subcategory);
+          }}
+        />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button className="rounded bg-brand px-4 py-2 text-white disabled:opacity-50" disabled={busy} type="submit">
           {busy ? "提交中…" : "创建"}

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
@@ -8,16 +8,18 @@ import {
   apps,
   getConfig,
   graceDaysLeft,
+  listCategoryTree,
   platformsForApps,
   syncAppPoolFlag,
+  upsertCategoryPair,
 } from "@appunions/db";
 import {
-  CATEGORIES,
   ERROR_CODES,
   ICON_MAX_BYTES,
   PLATFORMS,
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
+  isValidCategoryName,
   isValidPackageName,
 } from "@appunions/shared";
 import { db } from "../db.js";
@@ -31,7 +33,8 @@ import { utcDay } from "../lib/stats.js";
 const patchSchema = z.object({
   name: z.string().min(1).optional(),
   tagline: z.string().min(1).optional(),
-  category: z.enum(CATEGORIES).optional(),
+  category: z.string().min(1).optional(),
+  subcategory: z.string().min(1).optional(),
 });
 
 const platformsSchema = z.object({
@@ -52,6 +55,7 @@ function publicFields(app: typeof apps.$inferSelect) {
     iconUrl: app.iconUrl,
     tagline: app.tagline,
     category: app.category,
+    subcategory: app.subcategory,
   };
 }
 
@@ -119,7 +123,34 @@ async function parseMultipart(request: Parameters<FastifyInstance["post"]>[1] ex
   return { fields, icon };
 }
 
+async function resolveCategoryPair(
+  parentRaw: string,
+  childRaw: string,
+  reply: FastifyReply,
+): Promise<{ category: string; subcategory: string } | undefined> {
+  if (!isValidCategoryName(parentRaw) || !isValidCategoryName(childRaw)) {
+    sendError(reply, 400, ERROR_CODES.invalid_params, "请填写有效的大分类和小分类");
+    return;
+  }
+  try {
+    return await upsertCategoryPair(db, parentRaw, childRaw);
+  } catch {
+    sendError(reply, 400, ERROR_CODES.invalid_params, "分类无效");
+    return;
+  }
+}
+
 export async function dashboardAppRoutes(app: FastifyInstance) {
+  app.get("/dashboard/categories", { preHandler: requireUser() }, async () => {
+    const tree = await listCategoryTree(db);
+    return {
+      items: tree.map((root) => ({
+        id: root.id,
+        name: root.name,
+        children: root.children.map((child) => ({ id: child.id, name: child.name })),
+      })),
+    };
+  });
   app.get("/dashboard/apps", { preHandler: requireUser() }, async (request) => {
     const user = mustUser(request);
     const list = await db
@@ -164,12 +195,12 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     const name = fields.name?.trim();
     const tagline = fields.tagline?.trim();
     const category = fields.category;
-    if (!name || !tagline || !category) {
+    const subcategory = fields.subcategory;
+    if (!name || !tagline || !category || !subcategory) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写完整资料");
     }
-    if (!CATEGORIES.includes(category as (typeof CATEGORIES)[number])) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "不支持的分类");
-    }
+    const pair = await resolveCategoryPair(category, subcategory, reply);
+    if (!pair) return;
     if (graphemeLength(tagline) > TAGLINE_MAX_GRAPHEMES) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
@@ -191,7 +222,8 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
           name,
           iconUrl: "pending",
           tagline,
-          category,
+          category: pair.category,
+          subcategory: pair.subcategory,
         })
         .returning();
       const key = generateApiKey();
@@ -239,12 +271,25 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     if (parsed.data.tagline && graphemeLength(parsed.data.tagline) > TAGLINE_MAX_GRAPHEMES) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
+    let category = row.category;
+    let subcategory = row.subcategory;
+    if (parsed.data.category || parsed.data.subcategory) {
+      const pair = await resolveCategoryPair(
+        parsed.data.category ?? row.category,
+        parsed.data.subcategory ?? row.subcategory,
+        reply,
+      );
+      if (!pair) return;
+      category = pair.category;
+      subcategory = pair.subcategory;
+    }
     const [updated] = await db
       .update(apps)
       .set({
         name: parsed.data.name ?? row.name,
         tagline: parsed.data.tagline ?? row.tagline,
-        category: parsed.data.category ?? row.category,
+        category,
+        subcategory,
         updatedAt: new Date(),
       })
       .where(eq(apps.id, id))

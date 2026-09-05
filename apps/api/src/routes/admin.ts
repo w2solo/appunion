@@ -6,13 +6,18 @@ import {
   appReviews,
   apps,
   developers,
+  categoryUsage,
+  createCategory,
+  deleteCategory,
   getConfig,
+  listCategoryTree,
   platformConfig,
   platformsForApps,
   refreshRecommendPool,
+  renameCategory,
   syncAppPoolFlag,
 } from "@appunions/db";
-import { ERROR_CODES, isSuperAdminEmail } from "@appunions/shared";
+import { ERROR_CODES, isSuperAdminEmail, isValidCategoryName } from "@appunions/shared";
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
 import { mustUser, publicUser, requireAdmin, requireSuperAdmin } from "../lib/session.js";
@@ -239,6 +244,65 @@ export async function adminRoutes(app: FastifyInstance) {
     await refreshRecommendPool(db);
     await invalidatePoolCache();
     return updated;
+  });
+
+  app.get("/admin/categories", async () => {
+    const tree = await listCategoryTree(db);
+    return { items: await categoryUsage(db, tree) };
+  });
+
+  app.post("/admin/categories", async (request, reply) => {
+    const parsed = z
+      .object({ name: z.string(), parentId: z.string().uuid().nullable().optional() })
+      .safeParse(request.body);
+    if (!parsed.success || !isValidCategoryName(parsed.data.name)) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写有效的分类名");
+    }
+    try {
+      const row = await createCategory(db, parsed.data.name, parsed.data.parentId ?? null);
+      return row;
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "";
+      if (code === "duplicate_category") {
+        return sendError(reply, 400, ERROR_CODES.invalid_params, "同级已有这个分类");
+      }
+      if (code === "invalid_parent") {
+        return sendError(reply, 400, ERROR_CODES.invalid_params, "只能挂在大分类下");
+      }
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "分类无效");
+    }
+  });
+
+  app.patch("/admin/categories/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const parsed = z.object({ name: z.string() }).safeParse(request.body);
+    if (!parsed.success || !isValidCategoryName(parsed.data.name)) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写有效的分类名");
+    }
+    try {
+      const row = await renameCategory(db, id, parsed.data.name);
+      if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "分类不存在");
+      return row;
+    } catch (err) {
+      const code = err instanceof Error ? err.message : "";
+      if (code === "duplicate_category") {
+        return sendError(reply, 400, ERROR_CODES.invalid_params, "同级已有这个分类");
+      }
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "分类无效");
+    }
+  });
+
+  app.delete("/admin/categories/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const result = await deleteCategory(db, id);
+    if (result === "missing") return sendError(reply, 404, ERROR_CODES.not_found, "分类不存在");
+    if (result === "has_children") {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "请先删掉小分类");
+    }
+    if (result === "in_use") {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "已有应用在用，不能删除");
+    }
+    return { ok: true };
   });
 
   app.get("/admin/users", { preHandler: requireSuperAdmin() }, async (request) => {

@@ -61,7 +61,7 @@ export function DocsApi() {
         全量已通过且未暂停、且配置了该端的 App。必填 <code>platform</code>。page 从 1，page_size 默认 20，最大 50。
       </p>
       <p className="text-sm">
-        每条返回 <code>id, name, icon_url, tagline, category, platform, package_name</code>。客户端用包名打开商店，例如 Android{" "}
+        每条返回 <code>id, name, icon_url, tagline, category, subcategory, platform, package_name</code>。客户端用包名打开商店，例如 Android{" "}
         <code>market://details?id=&lt;package_name&gt;</code>。
       </p>
       <h2 className="mt-6 font-medium">POST /v1/events/impressions</h2>

@@ -90,7 +90,7 @@ Web **不写业务规则**（是否在推荐池、去重、审核状态机都在
 | --- | --- | --- |
 | 未登录 | 无 cookie | 登录、注册、公开文档 |
 | 开发者 | `role = developer` | 我的应用、应用详情、数据、文档 |
-| 普通管理员 | `role = admin`，由超管标记已注册用户 | 开发者能进的全部 + `/ops/review` `/ops/anomalies` `/ops/config` |
+| 普通管理员 | `role = admin`，由超管标记已注册用户 | 开发者能进的全部 + `/ops/review` `/ops/anomalies` `/ops/config` `/ops/categories` |
 | 超级管理员 | 固定邮箱 `cmlanche@qq.com` | 普通管理员能进的全部 + `/ops/admins` |
 
 未登录访问 `/apps` → 跳 `/login?next=...`。开发者访问 `/ops` → 403 页（「没有权限」），不要伪装成 404。
@@ -130,12 +130,13 @@ V1 不验证邮箱、不找回密码（与后端 D2 一致）。忘记密码文�
   /ops/apps/:id        审核详情
   /ops/anomalies       异常 CTR
   /ops/config          门槛参数
+  /ops/categories      分类
   /ops/admins          管理员（仅超管）
 ```
 
 顶栏：产品名、文档、邮箱、退出。运营多一个「审核」。
 
-侧栏仅登录后出现：我的应用、接入文档。运营再加：审核、异常、设置。超管再加：管理员。
+侧栏仅登录后出现：我的应用、接入文档。运营再加：审核、异常、设置、分类。超管再加：管理员。
 
 ---
 
@@ -228,7 +229,7 @@ flowchart TD
 | 名称 | 是 | |
 | 图标 | 是 | png/jpeg/webp，≤ 512KB，创建接口支持 multipart |
 | 描述 | 是 | 实时数字数，上限 30 |
-| 分类 | 是 | 下拉，文案用中文，值用后端枚举 |
+| 分类 | 是 | 大分类 + 小分类。点输入框提示已有项，也可输入新分类 |
 
 提交：`POST /dashboard/apps` → 成功进密钥模态框 → 确认后去 `/apps/:id`，在详情页勾选平台并填写包名。
 
@@ -323,6 +324,12 @@ flowchart TD
 仅超级管理员可见。搜索已注册用户，把对方标成普通管理员或取消。不能改超级管理员本人。未注册邮箱不能直接加进来，对方必须先登录一次。
 
 接口：`GET /admin/users?q=`，`PATCH /admin/users/:id` `{ role }`。
+
+### 7.12 运营：分类 `/ops/categories`
+
+两级目录。点输入框提示已有名称，也可输入新的。可改名、删除未使用的项。开发者创建应用时走同一套提示。
+
+接口：`GET/POST /admin/categories`，`PATCH/DELETE /admin/categories/:id`，开发者 `GET /dashboard/categories`。
 
 ---
 

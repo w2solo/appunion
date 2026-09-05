@@ -38,6 +38,7 @@ export const apps = pgTable(
     iconUrl: text("icon_url").notNull(),
     tagline: text("tagline").notNull(),
     category: text("category").notNull(),
+    subcategory: text("subcategory").notNull().default("其他"),
     reviewStatus: text("review_status").notNull().default("pending"),
     pausedByDeveloper: boolean("paused_by_developer").notNull().default(false),
     pausedByOps: boolean("paused_by_ops").notNull().default(false),
@@ -165,6 +166,19 @@ export const appDailyStats = pgTable(
   }),
 );
 
+export const categories = pgTable(
+  "categories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    parentId: uuid("parent_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    parentIdx: index("categories_parent_idx").on(t.parentId),
+  }),
+);
+
 export const platformConfig = pgTable("platform_config", {
   id: integer("id").primaryKey().default(1),
   graceDays: integer("grace_days").notNull().default(7),
@@ -190,5 +204,6 @@ export const anomalyFlags = pgTable("anomaly_flags", {
 
 export type Developer = typeof developers.$inferSelect;
 export type App = typeof apps.$inferSelect;
+export type Category = typeof categories.$inferSelect;
 export type AppPlatform = typeof appPlatforms.$inferSelect;
 export type PlatformConfig = typeof platformConfig.$inferSelect;

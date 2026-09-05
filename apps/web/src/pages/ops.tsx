@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../shared/api";
 import { platformLabel, statusLabel } from "../shared/status";
+import { SuggestInput } from "../shared/category-fields";
 
 type AdminApp = {
   id: string;
@@ -14,6 +15,8 @@ type AdminApp = {
   inRecommendPool: boolean;
   developerEmail: string;
   tagline: string;
+  category: string;
+  subcategory: string;
   rejectedReason: string | null;
   createdAt: string;
   reviews?: { id: string; action: string; reason: string | null; createdAt: string }[];
@@ -47,6 +50,7 @@ export function OpsReviewPage() {
             <tr>
               <th className="px-4 py-3">应用</th>
               <th className="px-4 py-3">端</th>
+              <th className="px-4 py-3">分类</th>
               <th className="px-4 py-3">开发者</th>
               <th />
             </tr>
@@ -59,6 +63,10 @@ export function OpsReviewPage() {
                   {app.platforms.length === 0
                     ? "未配置"
                     : app.platforms.map((p) => platformLabel(p.platform)).join(" / ")}
+                </td>
+                <td className="px-4 py-3">
+                  {app.category}
+                  {app.subcategory ? ` / ${app.subcategory}` : ""}
                 </td>
                 <td className="px-4 py-3">{app.developerEmail}</td>
                 <td className="px-4 py-3 text-right">
@@ -119,6 +127,10 @@ export function OpsAppPage() {
               ? "未配置平台"
               : app.platforms.map((p) => platformLabel(p.platform)).join(" / "))}{" "}
             · {app.developerEmail}
+          </p>
+          <p className="text-sm text-muted">
+            {app.category}
+            {app.subcategory ? ` / ${app.subcategory}` : ""}
           </p>
           <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
         </div>
@@ -389,3 +401,169 @@ type OpsConfig = {
   rateImpressionsPerMin: number;
   rateClicksPerMin: number;
 };
+
+type CategoryNode = { id: string; name: string; appCount: number; children: { id: string; name: string; appCount: number }[] };
+
+export function OpsCategoriesPage() {
+  const [items, setItems] = useState<CategoryNode[]>([]);
+  const [error, setError] = useState("");
+  const [parentDraft, setParentDraft] = useState("");
+  const [childDrafts, setChildDrafts] = useState<Record<string, string>>({});
+
+  async function load() {
+    const data = await api<{ items: CategoryNode[] }>("/admin/categories");
+    setItems(data.items);
+  }
+
+  useEffect(() => {
+    void load().catch((e: Error) => setError(e.message));
+  }, []);
+
+  async function addParent() {
+    setError("");
+    try {
+      await api("/admin/categories", {
+        method: "POST",
+        body: JSON.stringify({ name: parentDraft, parentId: null }),
+      });
+      setParentDraft("");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "添加失败");
+    }
+  }
+
+  async function addChild(parentId: string) {
+    const name = (childDrafts[parentId] ?? "").trim();
+    if (!name) return;
+    setError("");
+    try {
+      await api("/admin/categories", {
+        method: "POST",
+        body: JSON.stringify({ name, parentId }),
+      });
+      setChildDrafts((prev) => ({ ...prev, [parentId]: "" }));
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "添加失败");
+    }
+  }
+
+  async function rename(id: string, name: string) {
+    setError("");
+    try {
+      await api(`/admin/categories/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "保存失败");
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm("确定删除这个分类？")) return;
+    setError("");
+    try {
+      await api(`/admin/categories/${id}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "删除失败");
+    }
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <h1 className="text-2xl font-semibold">分类</h1>
+      <p className="text-sm text-muted">
+        大分类下再分小分类。点输入框会提示已有名称，也可以直接输入新的。开发者创建应用时同样可以选已有或输入新分类。
+      </p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <form
+        className="flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void addParent();
+        }}
+      >
+        <div className="flex-1">
+          <SuggestInput
+            value={parentDraft}
+            options={items.map((i) => i.name)}
+            placeholder="新增大分类"
+            onChange={setParentDraft}
+          />
+        </div>
+        <button className="rounded bg-brand px-4 py-2 text-sm text-white" type="submit">
+          添加大分类
+        </button>
+      </form>
+      <div className="space-y-3">
+        {items.map((group) => (
+          <section key={group.id} className="rounded-lg bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-2">
+              <input
+                className="flex-1 rounded border border-line px-3 py-1.5 text-sm font-medium"
+                defaultValue={group.name}
+                key={group.name}
+                onBlur={(e) => {
+                  const next = e.target.value.trim();
+                  if (next && next !== group.name) void rename(group.id, next);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <span className="text-xs text-muted">{group.appCount} 个应用</span>
+              <button className="text-sm text-red-700" type="button" onClick={() => void remove(group.id)}>
+                删除
+              </button>
+            </div>
+            <ul className="mt-3 space-y-2">
+              {group.children.map((child) => (
+                <li key={child.id} className="flex items-center gap-2">
+                  <input
+                    className="flex-1 rounded border border-line px-3 py-1.5 text-sm"
+                    defaultValue={child.name}
+                    key={child.name}
+                    onBlur={(e) => {
+                      const next = e.target.value.trim();
+                      if (next && next !== child.name) void rename(child.id, next);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                  />
+                  <span className="text-xs text-muted">{child.appCount}</span>
+                  <button className="text-sm text-red-700" type="button" onClick={() => void remove(child.id)}>
+                    删除
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <form
+              className="mt-3 flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void addChild(group.id);
+              }}
+            >
+              <div className="flex-1">
+                <SuggestInput
+                  value={childDrafts[group.id] ?? ""}
+                  options={group.children.map((c) => c.name)}
+                  placeholder="新增小分类"
+                  onChange={(value) => setChildDrafts((prev) => ({ ...prev, [group.id]: value }))}
+                />
+              </div>
+              <button className="rounded border border-line px-3 py-2 text-sm" type="submit">
+                添加
+              </button>
+            </form>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}

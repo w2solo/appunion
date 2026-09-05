@@ -1,8 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
-  CATEGORIES,
-  CATEGORY_LABELS,
   PACKAGE_NAME_HINTS,
   PLATFORMS,
   PLATFORM_LABELS,
@@ -12,6 +10,7 @@ import {
 import { api } from "../shared/api";
 import { KeyModal } from "../shared/key-modal";
 import { platformLabel, statusLabel } from "../shared/status";
+import { CategoryFields } from "../shared/category-fields";
 
 type AppPlatform = { platform: Platform; packageName: string };
 
@@ -21,6 +20,7 @@ type AppDetail = {
   iconUrl: string;
   tagline: string;
   category: string;
+  subcategory: string;
   platforms: AppPlatform[];
   reviewStatus: string;
   pausedByDeveloper: boolean;
@@ -61,6 +61,7 @@ export function AppDetailPage() {
       name: String(fd.get("name")),
       tagline: String(fd.get("tagline")),
       category: String(fd.get("category")),
+      subcategory: String(fd.get("subcategory")),
     };
     try {
       if (app?.reviewStatus === "rejected") {
@@ -96,16 +97,11 @@ export function AppDetailPage() {
             描述（{graphemeLength(app.tagline)}/30）
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name="tagline" defaultValue={app.tagline} />
           </label>
-          <label className="text-sm">
-            分类
-            <select className="mt-1 w-full rounded border border-line px-3 py-2" name="category" defaultValue={app.category}>
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {CATEGORY_LABELS[c]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <CategoryFields
+            category={app.category}
+            subcategory={app.subcategory}
+            onChange={(next) => setApp({ ...app, category: next.category, subcategory: next.subcategory })}
+          />
           <button className="w-fit rounded bg-brand px-4 py-2 text-white" type="submit">
             {app.reviewStatus === "rejected" ? "保存并重新提交" : "保存"}
           </button>

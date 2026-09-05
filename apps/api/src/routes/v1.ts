@@ -89,7 +89,7 @@ export async function v1Routes(app: FastifyInstance) {
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
-        limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).default(RECOMMEND_MAX),
+        limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).optional(),
       })
       .safeParse(request.query);
     if (!q.success) {
@@ -102,8 +102,8 @@ export async function v1Routes(app: FastifyInstance) {
     if (!(await rateLimit(`rec:${host.id}`, config.rateRecommendPerMin))) {
       return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
-    const { platform, limit } = q.data;
-    const items = await recommendItems(host.id, platform, limit);
+    const limit = Math.min(q.data.limit ?? host.listSize, host.listSize, RECOMMEND_MAX);
+    const items = await recommendItems(host.id, q.data.platform, limit);
     await rememberRecent(
       host.id,
       items.map((i) => i.id),

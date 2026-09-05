@@ -1,4 +1,5 @@
 import { Link, Outlet } from "react-router-dom";
+import { RecommendListPanel } from "../shared/recommend-list-panel";
 
 export function DocsLayout() {
   return (
@@ -31,14 +32,15 @@ export function DocsIndex() {
       <ol className="list-decimal space-y-2 pl-5 text-sm leading-7">
         <li>用邮箱验证码登录（新邮箱会自动注册），然后创建应用（名称、描述、图标）。</li>
         <li>到应用详情勾选支持的平台，并填写对应包名（Android applicationId、iOS Bundle ID、鸿蒙 bundleName）。</li>
+        <li>在「配置」里设置列表面板每次展示几条。</li>
         <li>保存一次性展示的 API Key，离开后无法再看明文。</li>
         <li>等待运营审核。通过前调用开放接口会返回未通过。</li>
         <li>
           用 <code>Authorization: Bearer &lt;api_key&gt;</code> 调 <code>GET /v1/apps/recommend?platform=android</code>
-          （换成当前端），最多 10 条。
+          （换成当前端）。条数以后台配置为准。
         </li>
         <li>卡片进入可视区域后再报曝光；用户点击后再报点击，然后用返回的 <code>package_name</code> 打开对应应用商店。</li>
-        <li>「换一批」再次请求 recommend；「查看全部」走 <code>GET /v1/apps</code> 分页。</li>
+        <li>「换一批」再次请求 recommend。不要做全量列表页。</li>
       </ol>
       <p className="text-sm text-muted">观察期和互惠门槛以后台显示为准，默认 7 天 / 100 次有效贡献曝光。</p>
     </>
@@ -54,11 +56,7 @@ export function DocsApi() {
       <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs">Authorization: Bearer auk_live_...</pre>
       <h2 className="mt-6 font-medium">GET /v1/apps/recommend</h2>
       <p className="text-sm">
-        Query：<code>platform</code>（必填，android / ios / harmonyos）、<code>limit</code> 默认 10，最大 10。同端、排除自己、仅推荐池，等权随机。宿主必须已配置该端。
-      </p>
-      <h2 className="mt-6 font-medium">GET /v1/apps</h2>
-      <p className="text-sm">
-        全量已通过且未暂停、且配置了该端的 App。必填 <code>platform</code>。page 从 1，page_size 默认 20，最大 50。
+        Query：<code>platform</code>（必填，android / ios / harmonyos）。同端、排除自己、仅推荐池，等权随机。返回条数由控制台「配置」决定（1–10）。宿主必须已配置该端。「换一批」再请求一次。
       </p>
       <p className="text-sm">
         每条返回 <code>id, name, icon_url, tagline, category, subcategory, platform, package_name</code>。客户端用包名打开商店，例如 Android{" "}
@@ -96,9 +94,9 @@ export function DocsRules() {
       <h1 className="text-2xl font-semibold">规则</h1>
       <ul className="list-disc space-y-2 pl-5 text-sm leading-7">
         <li>同端互推：请求时必须带当前端的 <code>platform</code>。Android 只出配置了 Android 包名的应用，iOS、鸿蒙同理。</li>
-        <li>推荐和全量列表都不包含你自己。</li>
+        <li>列表面板不含你自己。</li>
         <li>审核通过后有观察期（默认 7 天），期间可以被抽中。</li>
-        <li>之后滚动 7 天有效贡献曝光需达到门槛（默认 100），否则离开推荐池，但仍出现在全量列表。</li>
+        <li>之后滚动 7 天有效贡献曝光需达到门槛（默认 100），否则离开推荐池，别人的列表面板里暂时看不到你。</li>
         <li>开发者暂停：自己不出现在别人列表，开放接口仍可用。</li>
         <li>运营暂停：不出现在别人列表，且开放接口不可用。</li>
       </ul>
@@ -111,26 +109,19 @@ export function DocsUi() {
     <>
       <h1 className="text-2xl font-semibold">样式参考</h1>
       <p className="text-sm">
-        不是强制组件。你可以按自己 App 的风格来画，但必须上报曝光和点击。建议卡片包含：图标、名称、一句话、操作按钮。
+        只做一块内嵌列表面板，不要做「查看全部」页面。按系统原生分组列表来画，并按你 App 的字体和主色微调。必须上报曝光和点击。
       </p>
-      <div className="mx-auto mt-6 max-w-sm rounded-2xl border border-line bg-slate-50 p-4">
-        <div className="mb-3 text-center text-sm text-muted">推荐</div>
-        {[1, 2, 3].map((n) => (
-          <div key={n} className="mb-3 flex items-center gap-3 rounded-xl bg-white p-3 shadow-sm">
-            <div className="h-12 w-12 rounded-xl bg-slate-200" />
-            <div className="flex-1">
-              <div className="font-medium">示例应用 {n}</div>
-              <div className="text-xs text-muted">一句话介绍不超过三十个字</div>
-            </div>
-            <button className="rounded-full bg-brand px-3 py-1 text-xs text-white">查看</button>
-          </div>
-        ))}
-        <div className="mt-4 flex justify-between text-sm text-brand">
-          <span>换一批</span>
-          <span>查看全部</span>
-        </div>
+      <div className="mx-auto mt-6 max-w-[360px]">
+        <RecommendListPanel
+          items={[1, 2, 3, 4, 5].map((n) => ({
+            id: String(n),
+            name: `示例应用 ${n}`,
+            tagline: "一句话介绍不超过三十个字",
+          }))}
+          onShuffle={() => undefined}
+        />
       </div>
-      <p className="mt-4 text-sm text-muted">换一批 → GET /v1/apps/recommend?platform=…；查看全部 → GET /v1/apps?platform=…。</p>
+      <p className="mt-4 text-sm text-muted">换一批 → 再次请求 GET /v1/apps/recommend?platform=…。条数以后台「配置」为准。</p>
     </>
   );
 }

@@ -46,6 +46,7 @@ export const apps = pgTable(
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     inRecommendPool: boolean("in_recommend_pool").notNull().default(false),
     contributedImpressions7d: integer("contributed_impressions_7d").notNull().default(0),
+    listSize: integer("list_size").notNull().default(5),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

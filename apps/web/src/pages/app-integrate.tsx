@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PLATFORMS, PLATFORM_LABELS, type Platform } from "@appunions/shared";
 import { api } from "../shared/api";
 import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
-import { platformLabel } from "../shared/status";
+import { RecommendListPanel } from "../shared/recommend-list-panel";
 
 type ListingItem = {
   id: string;
@@ -15,22 +15,18 @@ type ListingItem = {
   package_name: string;
 };
 
-type Endpoint = "recommend" | "list";
-
 export function AppIntegratePanel({
   appId,
   appName,
   platforms,
+  listSize,
 }: {
   appId: string;
   appName: string;
   platforms: { platform: Platform; packageName: string }[];
+  listSize: number;
 }) {
-  const [endpoint, setEndpoint] = useState<Endpoint>("recommend");
   const [platform, setPlatform] = useState<Platform>(platforms[0]?.platform ?? "android");
-  const [limit, setLimit] = useState(10);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
   const [result, setResult] = useState<unknown>(null);
   const copyPrompt = useActionFeedback();
   const copyCurl = useActionFeedback();
@@ -42,25 +38,19 @@ export function AppIntegratePanel({
     }
   }, [platforms, platform]);
 
-  const v1Path =
-    endpoint === "recommend"
-      ? `/v1/apps/recommend?platform=${platform}&limit=${limit}`
-      : `/v1/apps?platform=${platform}&page=${page}&page_size=${pageSize}`;
-
+  const v1Path = `/v1/apps/recommend?platform=${platform}`;
   const curl = `curl -s '${window.location.origin}${v1Path}' \\\n  -H 'Authorization: Bearer <你的密钥>'`;
 
   const items = useMemo(() => {
     if (!result || typeof result !== "object" || !("items" in result)) return [];
-    return Array.isArray((result as { items: unknown }).items) ? ((result as { items: ListingItem[] }).items ?? []) : [];
+    return Array.isArray((result as { items: unknown }).items)
+      ? ((result as { items: ListingItem[] }).items ?? [])
+      : [];
   }, [result]);
 
   async function run() {
     await send.run(async () => {
-      const path =
-        endpoint === "recommend"
-          ? `/dashboard/apps/${appId}/preview/recommend?platform=${platform}&limit=${limit}`
-          : `/dashboard/apps/${appId}/preview/apps?platform=${platform}&page=${page}&page_size=${pageSize}`;
-      const data = await api(path);
+      const data = await api(`/dashboard/apps/${appId}/preview/recommend?platform=${platform}`);
       setResult(data);
     }, "已返回结果");
   }
@@ -69,103 +59,53 @@ export function AppIntegratePanel({
     appId,
     appName,
     platforms,
+    listSize,
     sample: result,
   });
 
   return (
     <div className="space-y-6">
       <section className="rounded-lg bg-white p-6 shadow-sm">
-        <h2 className="font-medium">API 请求测试</h2>
+        <h2 className="font-medium">列表面板预览</h2>
         <p className="mt-1 text-sm text-muted">
-          用当前登录态预览正式接口会返回的 JSON，不消耗 API Key，也不计入曝光和点击。审核通过后，客户端请改用密钥请求{" "}
-          <code>/v1</code>。
+          客户端只做这一块内嵌列表，条数以「配置」为准（当前 {listSize} 条）。后台预览不消耗 API Key，也不计入曝光和点击。点「换一批」会重新随机抽取。
         </p>
         {platforms.length === 0 && (
           <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
             请先在「基本信息」里至少配置一个平台，才能按端拉取列表。
           </p>
         )}
-        <div className="mt-4 flex flex-wrap gap-3 text-sm">
-          {(["recommend", "list"] as const).map((ep) => (
-            <button
-              key={ep}
-              className={`rounded px-3 py-1.5 ${endpoint === ep ? "bg-brand text-white" : "border border-line"}`}
-              type="button"
-              onClick={() => {
-                setEndpoint(ep);
-                setResult(null);
-                send.reset();
-              }}
-            >
-              {ep === "recommend" ? "推荐" : "全量列表"}
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <label className="text-sm">
-            端
-            <select
-              className="mt-1 w-full rounded border border-line px-3 py-2"
-              value={platform}
-              onChange={(e) => setPlatform(e.target.value as Platform)}
-            >
-              {(platforms.length > 0 ? platforms.map((p) => p.platform) : [...PLATFORMS]).map((p) => (
-                <option key={p} value={p}>
-                  {PLATFORM_LABELS[p]}
-                </option>
-              ))}
-            </select>
-          </label>
-          {endpoint === "recommend" ? (
-            <label className="text-sm">
-              limit（最多 10）
-              <input
-                className="mt-1 w-full rounded border border-line px-3 py-2"
-                type="number"
-                min={1}
-                max={10}
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-              />
-            </label>
-          ) : (
-            <>
-              <label className="text-sm">
-                page
-                <input
-                  className="mt-1 w-full rounded border border-line px-3 py-2"
-                  type="number"
-                  min={1}
-                  value={page}
-                  onChange={(e) => setPage(Number(e.target.value))}
-                />
-              </label>
-              <label className="text-sm">
-                page_size（最大 50）
-                <input
-                  className="mt-1 w-full rounded border border-line px-3 py-2"
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
-                />
-              </label>
-            </>
-          )}
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50"
-            disabled={send.busy || platforms.length === 0}
-            type="button"
-            onClick={() => void run()}
+        <label className="mt-4 block max-w-xs text-sm">
+          端
+          <select
+            className="mt-1 w-full rounded border border-line px-3 py-2"
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value as Platform)}
           >
-            {send.busy ? "请求中…" : "发送请求"}
-          </button>
+            {(platforms.length > 0 ? platforms.map((p) => p.platform) : [...PLATFORMS]).map((p) => (
+              <option key={p} value={p}>
+                {PLATFORM_LABELS[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="mx-auto mt-5 max-w-[360px]">
+          <RecommendListPanel
+            items={items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              iconUrl: item.icon_url,
+              tagline: item.tagline,
+            }))}
+            shuffling={send.busy}
+            emptyText={result == null ? "点换一批查看真实返回" : "暂时没有可展示的应用"}
+            onShuffle={platforms.length === 0 ? undefined : () => void run()}
+          />
+        </div>
+        <div className="mt-3 flex justify-center">
           <ActionStatus error={send.error} message={send.message} />
         </div>
-        <div className="mt-4">
+        <div className="mt-5">
           <div className="mb-1 flex items-center justify-between text-xs text-muted">
             <span>客户端正式请求</span>
             <button
@@ -179,26 +119,12 @@ export function AppIntegratePanel({
           <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs">{curl}</pre>
         </div>
         {result != null && (
-          <>
-            <h3 className="mt-5 text-sm font-medium">返回数据</h3>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-sm text-muted">返回 JSON</summary>
             <pre className="mt-2 max-h-80 overflow-auto rounded bg-slate-100 p-3 text-xs">
               {JSON.stringify(result, null, 2)}
             </pre>
-            {items.length > 0 && (
-              <ul className="mt-4 max-w-sm space-y-2">
-                {items.map((item) => (
-                  <li key={item.id} className="flex items-center gap-3 rounded-xl border border-line p-3">
-                    <img src={item.icon_url} alt="" className="h-12 w-12 rounded-xl" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{item.name}</div>
-                      <div className="truncate text-xs text-muted">{item.tagline}</div>
-                    </div>
-                    <span className="text-xs text-muted">{platformLabel(item.platform)}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
+          </details>
         )}
         <div className="mt-6 border-t border-line pt-4 text-sm">
           <h3 className="font-medium">曝光与点击（正式环境上报，后台不代发）</h3>
@@ -233,7 +159,7 @@ POST /v1/events/clicks
           </button>
         </div>
         <p className="mt-1 text-sm text-muted">
-          贴给 Cursor / Claude 等，按你 App 的设计自己写列表 UI。不是强制组件，但曝光和点击必须按规则上报。
+          贴给 Cursor / Claude 等，按你 App 的设计做一块内嵌列表面板。不要做全量页面。
         </p>
         <ActionStatus error={copyPrompt.error} />
         <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded bg-slate-100 p-3 text-xs leading-5">
@@ -248,11 +174,13 @@ function buildIntegratePrompt({
   appId,
   appName,
   platforms,
+  listSize,
   sample,
 }: {
   appId: string;
   appName: string;
   platforms: { platform: Platform; packageName: string }[];
+  listSize: number;
   sample: unknown;
 }) {
   const origin = typeof window === "undefined" ? "" : window.location.origin;
@@ -264,10 +192,20 @@ function buildIntegratePrompt({
     ? `\n## 一份真实返回示例\n\`\`\`json\n${JSON.stringify(sample, null, 2)}\n\`\`\`\n`
     : "";
 
-  return `你是资深移动端工程师。请为「${appName}」接入 AppUnions 应用互推，按本 App 现有设计风格自己写 UI，不要做成广告后台。
+  return `你是资深移动端工程师。请为「${appName}」接入 AppUnions 应用互推。
 
-## 目标
-在客户端内做一块推荐列表：卡片展示其他应用，用户可以换一批、查看全部，并在真实可见/点击时上报事件。
+## 只做一块内嵌列表面板
+不要做独立「全部应用」页面，不要分页，不要调用 GET /v1/apps。用户只在当前页看到这一块列表，点「换一批」重新随机抽取。
+
+视觉参考系统原生分组列表（iOS Settings / 类似 inset grouped）：
+- 浅灰底上的白色圆角卡片
+- 标题「发现应用」，右侧「换一批」
+- 每行：圆角图标、名称、一句话 tagline、右侧「打开」
+- 行与行之间细分割线
+- 按本 App 现有字体、间距和主色微调，不要做成广告横幅
+
+## 条数
+控制台已把列表条数配成 ${listSize}。GET /v1/apps/recommend 会按这个数量返回，客户端不要再截断、也不要再传更大的 limit。
 
 ## 凭证
 - Base URL：${origin}
@@ -278,13 +216,11 @@ function buildIntegratePrompt({
 - 请求时 platform 必须是当前运行端：android / ios / harmonyos
 
 ## 接口
-1. GET /v1/apps/recommend?platform=<当前端>&limit=10
-   从推荐池等权随机，最多 10 条，不含自己。
-2. GET /v1/apps?platform=<当前端>&page=1&page_size=20
-   全量已通过且未暂停、且配置了该端的应用。page 从 1，page_size 默认 20，最大 50。
-3. POST /v1/events/impressions
+1. GET /v1/apps/recommend?platform=<当前端>
+   从推荐池等权随机，返回 ${listSize} 条，不含自己。换一批 = 再请求一次。
+2. POST /v1/events/impressions
    卡片进入可视区域后再报。visible 必须为 true。单次最多 10 条。
-4. POST /v1/events/clicks
+3. POST /v1/events/clicks
    用户点击后再报，然后用返回的 package_name 打开对应应用商店。
 
 列表项字段：id, name, icon_url, tagline, category, subcategory, platform, package_name。
@@ -295,12 +231,7 @@ function buildIntegratePrompt({
 点击请求体：
 { "platform": "android", "client_id": "<同一 UUID>", "app_id": "<id>", "idempotency_key": "<UUID>" }
 
-## UI 要求
-- 每张卡片：图标、名称、一句话（tagline）、操作按钮
-- 「换一批」再次请求 recommend
-- 「查看全部」走分页 list
-- 打开商店：Android 用 market://details?id=<package_name>；iOS / 鸿蒙用返回的 package_name 打开对应应用市场
-- 不是强制组件，但曝光、点击必须按规则上报，禁止一进页就批量报曝光
+打开商店：Android 用 market://details?id=<package_name>；iOS / 鸿蒙用返回的 package_name 打开对应应用市场。禁止一进页就批量报曝光。
 
 ## 规则
 - 同端互推，未配置的端不要请求

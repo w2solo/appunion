@@ -18,8 +18,9 @@ import {
   ICON_MAX_BYTES,
   LIST_DEFAULT_PAGE_SIZE,
   LIST_MAX_PAGE_SIZE,
+  LIST_SIZE_MAX,
+  LIST_SIZE_MIN,
   PLATFORMS,
-  RECOMMEND_MAX,
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
   isValidCategoryName,
@@ -39,6 +40,7 @@ const patchSchema = z.object({
   tagline: z.string().min(1).optional(),
   category: z.string().min(1).optional(),
   subcategory: z.string().min(1).optional(),
+  listSize: z.number().int().min(LIST_SIZE_MIN).max(LIST_SIZE_MAX).optional(),
 });
 
 const platformsSchema = z.object({
@@ -60,6 +62,7 @@ function publicFields(app: typeof apps.$inferSelect) {
     tagline: app.tagline,
     category: app.category,
     subcategory: app.subcategory,
+    listSize: app.listSize,
   };
 }
 
@@ -294,6 +297,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
         tagline: parsed.data.tagline ?? row.tagline,
         category,
         subcategory,
+        listSize: parsed.data.listSize ?? row.listSize,
         updatedAt: new Date(),
       })
       .where(eq(apps.id, id))
@@ -448,7 +452,6 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     const q = z
       .object({
         platform: z.enum(PLATFORMS),
-        limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).default(RECOMMEND_MAX),
       })
       .safeParse(request.query);
     if (!q.success) {
@@ -457,7 +460,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     if (!(await hostHasPlatform(id, q.data.platform))) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
-    const items = await recommendItems(id, q.data.platform, q.data.limit);
+    const items = await recommendItems(id, q.data.platform, row.listSize);
     return { items };
   });
 

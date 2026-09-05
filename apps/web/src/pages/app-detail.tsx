@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
+  LIST_SIZE_MAX,
+  LIST_SIZE_MIN,
   PACKAGE_NAME_HINTS,
   PLATFORMS,
   PLATFORM_LABELS,
@@ -35,10 +37,12 @@ type AppDetail = {
   reciprocityThreshold: number;
   reciprocityGap: number;
   keyPrefix: string;
+  listSize: number;
 };
 
 const TABS = [
   { id: "info", label: "基本信息" },
+  { id: "config", label: "配置" },
   { id: "stats", label: "数据" },
   { id: "keys", label: "密钥" },
   { id: "integrate", label: "接入" },
@@ -98,10 +102,11 @@ export function AppDetailPage() {
         ))}
       </nav>
       {tab === "info" && <InfoTab app={app} setApp={setApp} onSaved={load} />}
+      {tab === "config" && <ConfigTab app={app} onSaved={load} />}
       {tab === "stats" && <AppStatsPanel id={id} />}
       {tab === "keys" && <KeysTab app={app} apiKey={apiKey} setApiKey={setApiKey} onRotated={load} />}
       {tab === "integrate" && (
-        <AppIntegratePanel appId={app.id} appName={app.name} platforms={app.platforms} />
+        <AppIntegratePanel appId={app.id} appName={app.name} platforms={app.platforms} listSize={app.listSize} />
       )}
       {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
     </div>
@@ -204,6 +209,58 @@ function InfoTab({
         </div>
       </section>
     </div>
+  );
+}
+
+function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<void> }) {
+  const { id } = useParams();
+  const [listSize, setListSize] = useState(app.listSize);
+  const save = useActionFeedback();
+
+  useEffect(() => {
+    setListSize(app.listSize);
+  }, [app.listSize]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    await save.run(async () => {
+      await api(`/dashboard/apps/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ listSize }),
+      });
+      await onSaved();
+    }, "已保存");
+  }
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow-sm">
+      <h2 className="font-medium">列表面板</h2>
+      <p className="mt-1 text-sm text-muted">
+        客户端只展示一块内嵌列表，不提供「查看全部」。这里设置每次随机展示几条，换一批会按这个数量重新抽取。
+      </p>
+      <form className="mt-4 max-w-xs space-y-3" onSubmit={(e) => void onSubmit(e)}>
+        <label className="block text-sm">
+          展示个数（{LIST_SIZE_MIN}–{LIST_SIZE_MAX}）
+          <select
+            className="mt-1 w-full rounded border border-line px-3 py-2"
+            value={listSize}
+            onChange={(e) => setListSize(Number(e.target.value))}
+          >
+            {Array.from({ length: LIST_SIZE_MAX - LIST_SIZE_MIN + 1 }, (_, i) => LIST_SIZE_MIN + i).map((n) => (
+              <option key={n} value={n}>
+                {n} 条
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={save.busy}>
+            {save.busy ? "保存中…" : "保存"}
+          </button>
+          <ActionStatus error={save.error} message={save.message} />
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -317,7 +374,7 @@ function PlatformsSection({
       </p>
       {app.platforms.length === 0 && (
         <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          请至少添加一个平台，否则无法出现在推荐和全量列表里。
+          请至少添加一个平台，否则无法出现在别人的列表面板里。
         </p>
       )}
       <div className="mt-4 space-y-3">
@@ -375,7 +432,7 @@ function StatusBar({ app }: { app: AppDetail }) {
   } else if (app.graceDaysLeft > 0) {
     text = `观察期还剩 ${app.graceDaysLeft} 天。请尽快在 App 里真实展示列表并上报曝光，否则到期会暂时离开推荐池。`;
   } else if (!app.inRecommendPool) {
-    text = `还差 ${app.reciprocityGap} 次有效曝光才能回到推荐池。全量列表里别人仍可能看到你。`;
+    text = `还差 ${app.reciprocityGap} 次有效曝光才能回到推荐池。暂时不会出现在别人的列表面板里。`;
   } else {
     text = "当前在推荐池中，可能被随机抽到。";
   }

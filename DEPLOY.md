@@ -67,9 +67,11 @@ bash deploy/install.sh
 
 1. 1Panel → **网站** → **创建网站** → **反向代理**
 2. 主域名填你的域名
-3. 代理地址填：`http://127.0.0.1:18080`
+3. 代理地址只填 `127.0.0.1:18080`（**不要**带 `http://`）。若表单有协议下拉框，选 `http`，地址框仍只填 `127.0.0.1:18080`
 4. 其它保持默认（会转发 `/v1`、`/dashboard`、页面路由）
 5. 在该网站里申请 / 上传证书，打开 HTTPS
+
+1Panel 会把这个值写进 nginx `upstream { server ... }`。写成 `http://127.0.0.1:18080` 会报 `invalid port in upstream`，保存失败。
 
 不要再单独建一个「静态网站」指到前端 dist，也不要把 80/443 映射进 Compose，那些留给 1Panel。
 
@@ -168,7 +170,8 @@ docker compose -f docker-compose.prod.yml --env-file deploy/.env exec -T postgre
 | `/health` 返回 503 | Postgres / Redis 没好，看 `logs postgres redis` |
 | 页面开得开，登录没验证码 | 没配 SendCloud，看 `logs api` 里的 `login code` |
 | 登录成功但立刻掉线 | 用了 HTTP 却 `COOKIE_SECURE=true`，或反代没把 Cookie 转给后端 |
-| 1Panel 502 | 服务没起来，或反代地址不是 `http://127.0.0.1:18080` |
+| 1Panel 保存反代报 `invalid port in upstream` | 代理地址写成了 `http://127.0.0.1:18080`。改成 `127.0.0.1:18080` 再保存 |
+| 1Panel 502 | 服务没起来，或反代地址/端口不是 `127.0.0.1:18080` |
 | 构建失败 / 拉镜像超时 | 确认在仓库根目录执行；1Panel 配镜像加速后再跑 `bash deploy/install.sh` |
 
 本地开发仍用根目录 `docker-compose.yml` 和 `.env`，与生产的 `docker-compose.prod.yml` / `deploy/.env` 互不影响。

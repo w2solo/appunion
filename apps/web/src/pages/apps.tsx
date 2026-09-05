@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../shared/api";
 import { platformLabel, statusLabel } from "../shared/status";
 
@@ -17,6 +17,7 @@ type Item = {
 };
 
 export function AppsPage() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState("");
 
@@ -55,14 +56,25 @@ export function AppsPage() {
             <th className="px-4 py-3 font-medium">端</th>
             <th className="px-4 py-3 font-medium">状态</th>
             <th className="px-4 py-3 font-medium">近 7 天曝光</th>
-            <th />
           </tr>
         </thead>
         <tbody>
           {items.map((app) => {
             const s = statusLabel(app);
             return (
-              <tr key={app.id} className="border-t border-line">
+              <tr
+                key={app.id}
+                className="cursor-pointer border-t border-line hover:bg-slate-50"
+                role="link"
+                tabIndex={0}
+                onClick={() => navigate(`/apps/${app.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/apps/${app.id}`);
+                  }
+                }}
+              >
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <img src={app.iconUrl} alt="" className="h-9 w-9 rounded" />
@@ -78,11 +90,6 @@ export function AppsPage() {
                   <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
                 </td>
                 <td className="px-4 py-3">{app.impressionsReceived7d}</td>
-                <td className="px-4 py-3 text-right">
-                  <Link className="text-brand" to={`/apps/${app.id}`}>
-                    详情
-                  </Link>
-                </td>
               </tr>
             );
           })}

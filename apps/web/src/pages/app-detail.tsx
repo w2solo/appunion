@@ -86,7 +86,6 @@ export function AppDetailPage() {
         <h1 className="text-2xl font-semibold">{app.name}</h1>
         <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
       </div>
-      <StatusBar app={app} />
       <nav className="flex gap-1 border-b border-line">
         {TABS.map((t) => (
           <button
@@ -145,6 +144,7 @@ function InfoTab({
 
   return (
     <div className="space-y-6">
+      <StatusBar app={app} />
       <PlatformsSection app={app} onSaved={onSaved} />
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">资料</h2>

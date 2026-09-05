@@ -52,10 +52,24 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 export const TAGLINE_MAX_GRAPHEMES = 30;
 export const ICON_MAX_BYTES = 512 * 1024;
+export const PACKAGE_NAME_MAX = 255;
 export const RECOMMEND_MAX = 10;
 export const LIST_DEFAULT_PAGE_SIZE = 20;
 export const LIST_MAX_PAGE_SIZE = 50;
 export const IMPRESSION_BATCH_MAX = 10;
+
+/** Android applicationId / iOS bundle id / HarmonyOS bundleName */
+export const PACKAGE_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_-]*)+$/;
+
+export const PACKAGE_NAME_HINTS: Record<Platform, string> = {
+  android: "Android applicationId，如 com.company.app",
+  ios: "iOS Bundle ID，如 com.company.app",
+  harmonyos: "鸿蒙 bundleName，如 com.company.app",
+};
+
+export function isValidPackageName(value: string): boolean {
+  return value.length > 0 && value.length <= PACKAGE_NAME_MAX && PACKAGE_NAME_RE.test(value);
+}
 
 export function graphemeLength(value: string): number {
   if (typeof Intl !== "undefined" && "Segmenter" in Intl) {

@@ -23,12 +23,12 @@ pnpm dev
 
 ## 演示路径
 
-1. 用邮箱验证码登录（新邮箱会自动注册），创建应用，保存一次性 API Key。
+1. 用邮箱验证码登录（新邮箱会自动注册），创建应用（名称、描述、图标），到详情页勾选平台并填写包名，保存一次性 API Key。
 2. 用运营账号登录，打开「审核」通过该应用。
 3. 用 curl 调开放接口（把 Key 换成你的明文）：
 
 ```bash
-curl -s http://localhost:3000/v1/apps/recommend \
+curl -s 'http://localhost:3000/v1/apps/recommend?platform=android' \
   -H "Authorization: Bearer auk_live_xxx"
 ```
 

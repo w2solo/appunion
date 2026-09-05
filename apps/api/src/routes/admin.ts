@@ -8,6 +8,7 @@ import {
   developers,
   getConfig,
   platformConfig,
+  platformsForApps,
   refreshRecommendPool,
   syncAppPoolFlag,
 } from "@appunions/db";
@@ -49,9 +50,14 @@ export async function adminRoutes(app: FastifyInstance) {
         ? rows.filter((r) => r.app.pausedByOps)
         : rows.filter((r) => r.app.reviewStatus === status)
       : rows;
+    const listings = await platformsForApps(
+      db,
+      filtered.map((r) => r.app.id),
+    );
     return {
       items: filtered.map((r) => ({
         ...r.app,
+        platforms: listings.get(r.app.id) ?? [],
         developerEmail: r.email,
       })),
     };
@@ -72,7 +78,13 @@ export async function adminRoutes(app: FastifyInstance) {
       .from(appReviews)
       .where(eq(appReviews.appId, id))
       .orderBy(desc(appReviews.createdAt));
-    return { ...row.app, developerEmail: row.email, reviews };
+    const listings = await platformsForApps(db, [id]);
+    return {
+      ...row.app,
+      platforms: listings.get(id) ?? [],
+      developerEmail: row.email,
+      reviews,
+    };
   });
 
   app.post("/admin/apps/:id/approve", async (request, reply) => {
@@ -99,7 +111,7 @@ export async function adminRoutes(app: FastifyInstance) {
       });
     });
     await syncAppPoolFlag(db, id);
-    await invalidatePoolCache(appRow.platform);
+    await invalidatePoolCache();
     const fresh = await db.select().from(apps).where(eq(apps.id, id)).limit(1);
     return fresh[0];
   });
@@ -131,7 +143,7 @@ export async function adminRoutes(app: FastifyInstance) {
         reason: reason.data.reason,
       });
     });
-    await invalidatePoolCache(appRow.platform);
+    await invalidatePoolCache();
     const fresh = await db.select().from(apps).where(eq(apps.id, id)).limit(1);
     return fresh[0];
   });
@@ -162,7 +174,7 @@ export async function adminRoutes(app: FastifyInstance) {
         reason: reason.data.reason,
       });
     });
-    await invalidatePoolCache(appRow.platform);
+    await invalidatePoolCache();
     const fresh = await db.select().from(apps).where(eq(apps.id, id)).limit(1);
     return fresh[0];
   });
@@ -182,7 +194,7 @@ export async function adminRoutes(app: FastifyInstance) {
       });
     });
     await syncAppPoolFlag(db, id);
-    await invalidatePoolCache(appRow.platform);
+    await invalidatePoolCache();
     const fresh = await db.select().from(apps).where(eq(apps.id, id)).limit(1);
     return fresh[0];
   });
@@ -197,7 +209,6 @@ export async function adminRoutes(app: FastifyInstance) {
       items: rows.map((r) => ({
         ...r.flag,
         appName: r.app.name,
-        platform: r.app.platform,
       })),
     };
   });

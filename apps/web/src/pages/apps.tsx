@@ -7,7 +7,7 @@ type Item = {
   id: string;
   name: string;
   iconUrl: string;
-  platform: string;
+  platforms: { platform: string; packageName: string }[];
   reviewStatus: string;
   pausedByDeveloper: boolean;
   pausedByOps: boolean;
@@ -69,7 +69,11 @@ export function AppsPage() {
                     <span>{app.name}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3">{platformLabel(app.platform)}</td>
+                <td className="px-4 py-3">
+                  {app.platforms.length === 0
+                    ? "未配置"
+                    : app.platforms.map((p) => platformLabel(p.platform)).join(" / ")}
+                </td>
                 <td className="px-4 py-3">
                   <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
                 </td>

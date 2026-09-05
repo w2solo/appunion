@@ -4,9 +4,11 @@ import { z } from "zod";
 import {
   apiKeys,
   appDailyStats,
+  appPlatforms,
   apps,
   getConfig,
   graceDaysLeft,
+  platformsForApps,
   syncAppPoolFlag,
 } from "@appunions/db";
 import {
@@ -16,6 +18,7 @@ import {
   PLATFORMS,
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
+  isValidPackageName,
 } from "@appunions/shared";
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
@@ -29,8 +32,17 @@ const patchSchema = z.object({
   name: z.string().min(1).optional(),
   tagline: z.string().min(1).optional(),
   category: z.enum(CATEGORIES).optional(),
-  storeUrl: z.string().url().optional(),
-  deeplink: z.string().nullable().optional(),
+});
+
+const platformsSchema = z.object({
+  platforms: z
+    .array(
+      z.object({
+        platform: z.enum(PLATFORMS),
+        packageName: z.string().min(1),
+      }),
+    )
+    .max(PLATFORMS.length),
 });
 
 function publicFields(app: typeof apps.$inferSelect) {
@@ -40,10 +52,16 @@ function publicFields(app: typeof apps.$inferSelect) {
     iconUrl: app.iconUrl,
     tagline: app.tagline,
     category: app.category,
-    platform: app.platform,
-    storeUrl: app.storeUrl,
-    deeplink: app.deeplink,
   };
+}
+
+function isUniqueViolation(err: unknown) {
+  let current: unknown = err;
+  for (let i = 0; i < 5 && current && typeof current === "object"; i++) {
+    if ("code" in current && (current as { code: unknown }).code === "23505") return true;
+    current = "cause" in current ? (current as { cause: unknown }).cause : undefined;
+  }
+  return false;
 }
 
 async function ownedApp(developerId: string, appId: string) {
@@ -68,8 +86,10 @@ async function present(app: typeof apps.$inferSelect) {
   const config = await getConfig(db);
   const left = graceDaysLeft(app.approvedAt, config.graceDays);
   const gap = Math.max(0, config.reciprocityImpressions - app.contributedImpressions7d);
+  const listings = await platformsForApps(db, [app.id]);
   return {
     ...publicFields(app),
+    platforms: listings.get(app.id) ?? [],
     reviewStatus: app.reviewStatus,
     pausedByDeveloper: app.pausedByDeveloper,
     pausedByOps: app.pausedByOps,
@@ -109,6 +129,10 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       .orderBy(desc(apps.createdAt));
     const config = await getConfig(db);
     const since = utcDay(new Date(Date.now() - 6 * 24 * 60 * 60 * 1000));
+    const listings = await platformsForApps(
+      db,
+      list.map((row) => row.id),
+    );
     const items = await Promise.all(
       list.map(async (row) => {
         const rec = await db
@@ -121,7 +145,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
           id: row.id,
           name: row.name,
           iconUrl: row.iconUrl,
-          platform: row.platform,
+          platforms: listings.get(row.id) ?? [],
           reviewStatus: row.reviewStatus,
           pausedByDeveloper: row.pausedByDeveloper,
           pausedByOps: row.pausedByOps,
@@ -140,25 +164,14 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     const name = fields.name?.trim();
     const tagline = fields.tagline?.trim();
     const category = fields.category;
-    const platform = fields.platform;
-    const storeUrl = fields.storeUrl ?? fields.store_url;
-    const deeplink = (fields.deeplink ?? "").trim() || null;
-    if (!name || !tagline || !category || !platform || !storeUrl) {
+    if (!name || !tagline || !category) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "请填写完整资料");
-    }
-    if (!PLATFORMS.includes(platform as (typeof PLATFORMS)[number])) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "不支持的系统");
     }
     if (!CATEGORIES.includes(category as (typeof CATEGORIES)[number])) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "不支持的分类");
     }
     if (graphemeLength(tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "一句话介绍不能超过 30 字");
-    }
-    try {
-      new URL(storeUrl);
-    } catch {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "商店链接无效");
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
     if (!icon) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "请上传图标");
@@ -179,9 +192,6 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
           iconUrl: "pending",
           tagline,
           category,
-          platform,
-          storeUrl,
-          deeplink,
         })
         .returning();
       const key = generateApiKey();
@@ -227,7 +237,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "参数无效");
     }
     if (parsed.data.tagline && graphemeLength(parsed.data.tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(reply, 400, ERROR_CODES.invalid_params, "一句话介绍不能超过 30 字");
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
     }
     const [updated] = await db
       .update(apps)
@@ -235,13 +245,58 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
         name: parsed.data.name ?? row.name,
         tagline: parsed.data.tagline ?? row.tagline,
         category: parsed.data.category ?? row.category,
-        storeUrl: parsed.data.storeUrl ?? row.storeUrl,
-        deeplink: parsed.data.deeplink === undefined ? row.deeplink : parsed.data.deeplink,
         updatedAt: new Date(),
       })
       .where(eq(apps.id, id))
       .returning();
     return present(updated!);
+  });
+
+  app.put("/dashboard/apps/:id/platforms", { preHandler: requireUser() }, async (request, reply) => {
+    const user = mustUser(request);
+    const { id } = request.params as { id: string };
+    const row = await ownedApp(user.id, id);
+    if (!row) return sendError(reply, 404, ERROR_CODES.not_found, "应用不存在");
+    if (row.pausedByOps) {
+      return sendError(reply, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
+    }
+    const parsed = platformsSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "平台参数无效");
+    }
+    const seen = new Set<string>();
+    for (const item of parsed.data.platforms) {
+      if (seen.has(item.platform)) {
+        return sendError(reply, 400, ERROR_CODES.invalid_params, "同一端只能填一次");
+      }
+      seen.add(item.platform);
+      const packageName = item.packageName.trim();
+      if (!isValidPackageName(packageName)) {
+        return sendError(reply, 400, ERROR_CODES.invalid_params, "包名格式无效，需为反向域名如 com.company.app");
+      }
+    }
+    try {
+      await db.transaction(async (tx) => {
+        await tx.delete(appPlatforms).where(eq(appPlatforms.appId, id));
+        if (parsed.data.platforms.length > 0) {
+          await tx.insert(appPlatforms).values(
+            parsed.data.platforms.map((item) => ({
+              appId: id,
+              platform: item.platform,
+              packageName: item.packageName.trim(),
+            })),
+          );
+        }
+      });
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        return sendError(reply, 409, ERROR_CODES.invalid_params, "该端包名已被其他应用占用");
+      }
+      throw err;
+    }
+    await invalidatePoolCache();
+    const fresh = await ownedApp(user.id, id);
+    return present(fresh!);
   });
 
   app.post("/dashboard/apps/:id/resubmit", { preHandler: requireUser() }, async (request, reply) => {
@@ -274,7 +329,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
       .set({ pausedByDeveloper: true, inRecommendPool: false, updatedAt: new Date() })
       .where(eq(apps.id, id))
       .returning();
-    await invalidatePoolCache(row.platform);
+    await invalidatePoolCache();
     return present(updated!);
   });
 
@@ -288,7 +343,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
     }
     await db.update(apps).set({ pausedByDeveloper: false, updatedAt: new Date() }).where(eq(apps.id, id));
     await syncAppPoolFlag(db, id);
-    await invalidatePoolCache(row.platform);
+    await invalidatePoolCache();
     const fresh = await ownedApp(user.id, id);
     return present(fresh!);
   });

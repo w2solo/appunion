@@ -38,9 +38,6 @@ export const apps = pgTable(
     iconUrl: text("icon_url").notNull(),
     tagline: text("tagline").notNull(),
     category: text("category").notNull(),
-    platform: text("platform").notNull(),
-    storeUrl: text("store_url").notNull(),
-    deeplink: text("deeplink"),
     reviewStatus: text("review_status").notNull().default("pending"),
     pausedByDeveloper: boolean("paused_by_developer").notNull().default(false),
     pausedByOps: boolean("paused_by_ops").notNull().default(false),
@@ -52,9 +49,26 @@ export const apps = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    platformIdx: index("apps_platform_idx").on(t.platform),
-    poolIdx: index("apps_pool_idx").on(t.platform, t.inRecommendPool),
+    poolIdx: index("apps_pool_idx").on(t.inRecommendPool),
     developerIdx: index("apps_developer_idx").on(t.developerId),
+  }),
+);
+
+export const appPlatforms = pgTable(
+  "app_platforms",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    appId: uuid("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull(),
+    packageName: text("package_name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    appPlatformUidx: uniqueIndex("app_platforms_app_platform_uidx").on(t.appId, t.platform),
+    packageUidx: uniqueIndex("app_platforms_platform_package_uidx").on(t.platform, t.packageName),
+    platformIdx: index("app_platforms_platform_idx").on(t.platform),
   }),
 );
 
@@ -176,4 +190,5 @@ export const anomalyFlags = pgTable("anomaly_flags", {
 
 export type Developer = typeof developers.$inferSelect;
 export type App = typeof apps.$inferSelect;
+export type AppPlatform = typeof appPlatforms.$inferSelect;
 export type PlatformConfig = typeof platformConfig.$inferSelect;

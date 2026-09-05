@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
+import { isValidPackageName } from "@appunions/shared";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 
@@ -61,5 +62,15 @@ describe("api keys", () => {
     assert.ok(key.plaintext.startsWith("auk_live_"));
     assert.equal(hashApiKey(key.plaintext), key.hash);
     assert.notEqual(hashApiKey("other"), key.hash);
+  });
+});
+
+describe("package names", () => {
+  it("accepts reverse-dns ids and rejects junk", () => {
+    assert.equal(isValidPackageName("com.company.app"), true);
+    assert.equal(isValidPackageName("com.company.my-app"), true);
+    assert.equal(isValidPackageName("app"), false);
+    assert.equal(isValidPackageName("com."), false);
+    assert.equal(isValidPackageName(""), false);
   });
 });

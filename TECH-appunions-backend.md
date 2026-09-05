@@ -113,6 +113,7 @@ flowchart TB
 ```mermaid
 erDiagram
   developers ||--o{ apps : owns
+  apps ||--o{ app_platforms : lists_on
   apps ||--o{ api_keys : has
   apps ||--o{ app_reviews : audited_by
   apps ||--o{ impression_events : host_or_target
@@ -143,9 +144,6 @@ erDiagram
 | icon_url | text | 存储完成后的 HTTPS URL |
 | tagline | text | 一句话，最长 30 汉字（按 Unicode 字素校验） |
 | category | text | 预设枚举 |
-| platform | text | `android` / `ios` / `harmonyos`，创建后不可改 |
-| store_url | text | |
-| deeplink | text null | 鸿蒙 want 也走这个字段 |
 | review_status | text | `pending` / `approved` / `rejected` |
 | paused_by_developer | bool | 默认 false |
 | paused_by_ops | bool | 默认 false |
@@ -164,6 +162,18 @@ AND paused_by_ops = false
 ```
 
 推荐池比可见性多互惠规则，见第 7 节。`in_recommend_pool` 是物化结果，避免每次 `GET /recommend` 现算 7 天窗口。
+
+**app_platforms**
+
+一个 App 可配置多个端。同一 `(app_id, platform)` 唯一；同一端的 `package_name` 全局唯一。
+
+| 列 | 类型 | 说明 |
+| --- | --- | --- |
+| id | uuid PK | |
+| app_id | uuid FK | |
+| platform | text | `android` / `ios` / `harmonyos` |
+| package_name | text | Android applicationId / iOS Bundle ID / 鸿蒙 bundleName |
+| created_at | timestamptz | |
 
 **api_keys**
 
@@ -310,12 +320,12 @@ stateDiagram-v2
 
 ### 6.2 `GET /v1/apps/recommend`
 
-Query：`limit` 默认 10，最小 1，最大 10。
+Query：`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 10，最小 1，最大 10。
 
 逻辑：
 
-1. 鉴权，得到宿主 `platform`。
-2. 读 Redis `pool:{platform}`（TTL = `recommend_cache_seconds`）。没有则从 DB 拉 `id WHERE in_recommend_pool AND platform = ?`，写入 Redis。
+1. 鉴权，校验宿主已配置请求的 `platform`。
+2. 读 Redis `pool:{platform}`（TTL = `recommend_cache_seconds`）。没有则从 DB 拉 `id WHERE in_recommend_pool AND 存在该端 app_platforms`，写入 Redis。
 3. 从列表去掉宿主自己。
 4. Fisher–Yates 洗牌，取 `limit` 条。池更小则全返回。
 5. 用 ID 批量查 App 展示字段（可再加一层 30s 的详情缓存）。
@@ -327,9 +337,9 @@ V1 池子最多几百个 ID，洗牌在内存做。不要 `ORDER BY random()` �
 
 ### 6.3 `GET /v1/apps`
 
-Query：`page` 从 1，`page_size` 默认 20，最大 50。
+Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 
-过滤：同端、可见（已通过且两种 pause 都为 false）、排除自己。
+过滤：该端已填包名、可见（已通过且两种 pause 都为 false）、排除自己。
 
 排序：`created_at DESC, id DESC`（稳定分页）。V1 无分类筛选。
 
@@ -345,8 +355,7 @@ Query：`page` 从 1，`page_size` 默认 20，最大 50。
   "tagline": "...",
   "category": "tools",
   "platform": "android",
-  "store_url": "https://...",
-  "deeplink": "myapp://home"
+  "package_name": "com.company.app"
 }
 ```
 
@@ -356,6 +365,7 @@ Query：`page` 从 1，`page_size` 默认 20，最大 50。
 
 ```json
 {
+  "platform": "android",
   "client_id": "uuid",
   "impressions": [
     { "app_id": "uuid", "idempotency_key": "uuid", "visible": true }
@@ -394,6 +404,7 @@ Query：`page` 从 1，`page_size` 默认 20，最大 50。
 
 ```json
 {
+  "platform": "android",
   "client_id": "uuid",
   "app_id": "uuid",
   "idempotency_key": "uuid"
@@ -504,10 +515,11 @@ Query：`page` 从 1，`page_size` 默认 20，最大 50。
 | POST | `/dashboard/auth/login` | |
 | POST | `/dashboard/auth/logout` | |
 | GET | `/dashboard/auth/me` | 当前用户 `{ id, email, role }`，Web 刷新页面用 |
-| GET | `/dashboard/apps` | 我的 App 列表。每条带摘要：`icon_url, platform, review_status, paused_*, in_recommend_pool, grace_days_left, impressions_received_7d` |
-| POST | `/dashboard/apps` | 创建，支持 `multipart`（资料+图标一次提交）。`platform` 此后不可改。生成 api_key，**响应里明文只出现这一次** |
-| GET | `/dashboard/apps/:id` | 资料 + 审核状态 + key_prefix + 池状态 + 门槛缺口 |
-| PATCH | `/dashboard/apps/:id` | 改资料。已通过的资料变更是否重新进审核：见 D3 |
+| GET | `/dashboard/apps` | 我的 App 列表。每条带摘要：`icon_url, platforms, review_status, paused_*, in_recommend_pool, grace_days_left, impressions_received_7d` |
+| POST | `/dashboard/apps` | 创建，`multipart`（名称、描述、分类、图标）。生成 api_key，**响应里明文只出现这一次** |
+| GET | `/dashboard/apps/:id` | 资料 + `platforms` + 审核状态 + key_prefix + 池状态 + 门槛缺口 |
+| PATCH | `/dashboard/apps/:id` | 改名称/描述/分类。已通过的资料变更是否重新进审核：见 D3 |
+| PUT | `/dashboard/apps/:id/platforms` | 覆盖该 App 的端与包名。`{ platforms: [{ platform, packageName }] }` |
 | POST | `/dashboard/apps/:id/resubmit` | 拒绝后重提，`review_status → pending`，清 `rejected_reason` |
 | POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表 |
 | POST | `/dashboard/apps/:id/resume` | 仅当 `paused_by_ops = false` |
@@ -547,7 +559,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/admin/apps?status=pending` | 审核队列 |
-| GET | `/admin/apps/:id` | 含商店链接、图标，供人工点开检查 |
+| GET | `/admin/apps/:id` | 含各端包名、图标，供人工核对 |
 | POST | `/admin/apps/:id/approve` | 写 `approved_at = now()`（仅首次通过时），进观察期 |
 | POST | `/admin/apps/:id/reject` | body `{ reason }` 必填 |
 | POST | `/admin/apps/:id/pause` | `paused_by_ops`，reason 必填 |
@@ -648,7 +660,7 @@ packages/shared   Zod 类型、分类枚举、错误码
 | --- | --- | --- | --- |
 | D1 | 上报是否强制 `client_id` | **强制**。否则无法按用户去重曝光 | 不收 client_id，只做幂等 + 整 App 限流，统计会偏粗 |
 | D2 | 注册是否验证邮箱 | V1 **不验证**，尽快接入 | 接入 Resend/SES 后再加 |
-| D3 | 已通过 App 改名称/图标/商店链接 | **不自动打回待审**，运营抽查 | 改关键字段则回到 pending，更安全更烦 |
+| D3 | 已通过 App 改名称/图标/包名 | **不自动打回待审**，运营抽查 | 改关键字段则回到 pending，更安全更烦 |
 | D4 | 开发者暂停后开放 API | **可用**（PRD） | 一并封禁，更狠但影响接入调试 |
 | D5 | 运营暂停后开放 API | **不可用** | 仍可用，只是自己不出现在别人列表 |
 | D6 | 点击必须命中 recent 下发列表 | **是** | 只要同端可见即可，实现简单但更好刷 |

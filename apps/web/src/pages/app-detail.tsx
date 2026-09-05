@@ -1,9 +1,19 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { CATEGORIES, CATEGORY_LABELS, graphemeLength } from "@appunions/shared";
+import {
+  CATEGORIES,
+  CATEGORY_LABELS,
+  PACKAGE_NAME_HINTS,
+  PLATFORMS,
+  PLATFORM_LABELS,
+  graphemeLength,
+  type Platform,
+} from "@appunions/shared";
 import { api } from "../shared/api";
 import { KeyModal } from "../shared/key-modal";
 import { platformLabel, statusLabel } from "../shared/status";
+
+type AppPlatform = { platform: Platform; packageName: string };
 
 type AppDetail = {
   id: string;
@@ -11,9 +21,7 @@ type AppDetail = {
   iconUrl: string;
   tagline: string;
   category: string;
-  platform: string;
-  storeUrl: string;
-  deeplink: string | null;
+  platforms: AppPlatform[];
   reviewStatus: string;
   pausedByDeveloper: boolean;
   pausedByOps: boolean;
@@ -53,8 +61,6 @@ export function AppDetailPage() {
       name: String(fd.get("name")),
       tagline: String(fd.get("tagline")),
       category: String(fd.get("category")),
-      storeUrl: String(fd.get("storeUrl")),
-      deeplink: String(fd.get("deeplink") || "") || null,
     };
     try {
       if (app?.reviewStatus === "rejected") {
@@ -78,6 +84,7 @@ export function AppDetailPage() {
         </Link>
       </div>
       <StatusBar app={app} badge={s.text} />
+      <PlatformsSection app={app} onSaved={load} onError={setError} />
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">资料</h2>
         <form className="mt-4 grid gap-3" onSubmit={(e) => void onSave(e)}>
@@ -86,7 +93,7 @@ export function AppDetailPage() {
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name="name" defaultValue={app.name} />
           </label>
           <label className="text-sm">
-            一句话（{graphemeLength(app.tagline)}/30）
+            描述（{graphemeLength(app.tagline)}/30）
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name="tagline" defaultValue={app.tagline} />
           </label>
           <label className="text-sm">
@@ -98,15 +105,6 @@ export function AppDetailPage() {
                 </option>
               ))}
             </select>
-          </label>
-          <p className="text-sm text-muted">系统：{platformLabel(app.platform)}（不可改）</p>
-          <label className="text-sm">
-            商店链接
-            <input className="mt-1 w-full rounded border border-line px-3 py-2" name="storeUrl" defaultValue={app.storeUrl} />
-          </label>
-          <label className="text-sm">
-            自定义跳转
-            <input className="mt-1 w-full rounded border border-line px-3 py-2" name="deeplink" defaultValue={app.deeplink ?? ""} />
           </label>
           <button className="w-fit rounded bg-brand px-4 py-2 text-white" type="submit">
             {app.reviewStatus === "rejected" ? "保存并重新提交" : "保存"}
@@ -171,6 +169,102 @@ export function AppDetailPage() {
       </section>
       {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
     </div>
+  );
+}
+
+function PlatformsSection({
+  app,
+  onSaved,
+  onError,
+}: {
+  app: AppDetail;
+  onSaved: () => Promise<void>;
+  onError: (msg: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [enabled, setEnabled] = useState<Record<Platform, boolean>>(() => {
+    const next = { android: false, ios: false, harmonyos: false };
+    for (const p of app.platforms) next[p.platform] = true;
+    return next;
+  });
+  const [names, setNames] = useState<Record<Platform, string>>(() => {
+    const next = { android: "", ios: "", harmonyos: "" };
+    for (const p of app.platforms) next[p.platform] = p.packageName;
+    return next;
+  });
+
+  useEffect(() => {
+    const nextEnabled = { android: false, ios: false, harmonyos: false } as Record<Platform, boolean>;
+    const nextNames = { android: "", ios: "", harmonyos: "" } as Record<Platform, string>;
+    for (const p of app.platforms) {
+      nextEnabled[p.platform] = true;
+      nextNames[p.platform] = p.packageName;
+    }
+    setEnabled(nextEnabled);
+    setNames(nextNames);
+  }, [app.platforms]);
+
+  async function save() {
+    setBusy(true);
+    try {
+      const platforms = PLATFORMS.filter((p) => enabled[p]).map((p) => ({
+        platform: p,
+        packageName: names[p].trim(),
+      }));
+      await api(`/dashboard/apps/${app.id}/platforms`, {
+        method: "PUT",
+        body: JSON.stringify({ platforms }),
+      });
+      await onSaved();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "保存平台失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-lg bg-white p-6 shadow-sm">
+      <h2 className="font-medium">支持的平台</h2>
+      <p className="mt-1 text-sm text-muted">
+        勾选端并填写包名。客户端用包名打开对应应用商店，不需要商店链接。
+      </p>
+      {app.platforms.length === 0 && (
+        <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          请至少添加一个平台，否则无法出现在推荐和全量列表里。
+        </p>
+      )}
+      <div className="mt-4 space-y-3">
+        {PLATFORMS.map((p) => (
+          <div key={p} className="rounded border border-line p-3">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                checked={enabled[p]}
+                onChange={(e) => setEnabled((prev) => ({ ...prev, [p]: e.target.checked }))}
+              />
+              {PLATFORM_LABELS[p]}
+            </label>
+            {enabled[p] && (
+              <input
+                className="mt-2 w-full rounded border border-line px-3 py-2 text-sm"
+                placeholder={PACKAGE_NAME_HINTS[p]}
+                value={names[p]}
+                onChange={(e) => setNames((prev) => ({ ...prev, [p]: e.target.value }))}
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <button className="mt-4 rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={busy} onClick={() => void save()}>
+        {busy ? "保存中…" : "保存平台"}
+      </button>
+      {app.platforms.length > 0 && (
+        <p className="mt-3 text-xs text-muted">
+          当前：{app.platforms.map((p) => `${platformLabel(p.platform)} ${p.packageName}`).join(" · ")}
+        </p>
+      )}
+    </section>
   );
 }
 

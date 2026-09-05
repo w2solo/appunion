@@ -7,15 +7,13 @@ type AdminApp = {
   id: string;
   name: string;
   iconUrl: string;
-  platform: string;
+  platforms: { platform: string; packageName: string }[];
   reviewStatus: string;
   pausedByDeveloper: boolean;
   pausedByOps: boolean;
   inRecommendPool: boolean;
   developerEmail: string;
-  storeUrl: string;
   tagline: string;
-  deeplink: string | null;
   rejectedReason: string | null;
   createdAt: string;
   reviews?: { id: string; action: string; reason: string | null; createdAt: string }[];
@@ -57,7 +55,11 @@ export function OpsReviewPage() {
             {items.map((app) => (
               <tr key={app.id} className="border-t border-line">
                 <td className="px-4 py-3">{app.name}</td>
-                <td className="px-4 py-3">{platformLabel(app.platform)}</td>
+                <td className="px-4 py-3">
+                  {app.platforms.length === 0
+                    ? "未配置"
+                    : app.platforms.map((p) => platformLabel(p.platform)).join(" / ")}
+                </td>
                 <td className="px-4 py-3">{app.developerEmail}</td>
                 <td className="px-4 py-3 text-right">
                   <Link className="text-brand" to={`/ops/apps/${app.id}`}>
@@ -113,18 +115,26 @@ export function OpsAppPage() {
         <div>
           <h1 className="text-2xl font-semibold">{app.name}</h1>
           <p className="text-sm text-muted">
-            {platformLabel(app.platform)} · {app.developerEmail}
+            {(app.platforms.length === 0
+              ? "未配置平台"
+              : app.platforms.map((p) => platformLabel(p.platform)).join(" / "))}{" "}
+            · {app.developerEmail}
           </p>
           <span className={`rounded px-2 py-0.5 text-xs ${s.className}`}>{s.text}</span>
         </div>
       </div>
       <p>{app.tagline}</p>
-      <p>
-        <a className="text-brand" href={app.storeUrl} target="_blank" rel="noreferrer">
-          打开商店链接
-        </a>
-      </p>
-      {app.deeplink && <p className="text-sm">deeplink: {app.deeplink}</p>}
+      {app.platforms.length === 0 ? (
+        <p className="text-sm text-amber-800">尚未配置平台和包名。</p>
+      ) : (
+        <ul className="space-y-1 text-sm">
+          {app.platforms.map((p) => (
+            <li key={p.platform}>
+              {platformLabel(p.platform)}：<code className="rounded bg-slate-100 px-1">{p.packageName}</code>
+            </li>
+          ))}
+        </ul>
+      )}
       {error && <p className="text-red-600">{error}</p>}
       <div className="flex flex-wrap gap-2">
         <button className="rounded bg-green-700 px-3 py-2 text-sm text-white" onClick={() => void act("approve")}>

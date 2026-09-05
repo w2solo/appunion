@@ -1,6 +1,6 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { CATEGORIES, CATEGORY_LABELS, PLATFORMS, PLATFORM_LABELS, graphemeLength } from "@appunions/shared";
+import { CATEGORIES, CATEGORY_LABELS, graphemeLength } from "@appunions/shared";
 import { api } from "../shared/api";
 import { KeyModal } from "../shared/key-modal";
 
@@ -35,6 +35,7 @@ export function NewAppPage() {
   return (
     <div className="max-w-xl">
       <h1 className="text-2xl font-semibold">创建应用</h1>
+      <p className="mt-2 text-sm text-muted">先填写名称、描述和图标。创建后到详情页选择支持的平台并填写包名。</p>
       <form className="mt-6 space-y-4 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onSubmit(e)}>
         <Field name="name" label="名称" required />
         <label className="block text-sm">
@@ -42,13 +43,14 @@ export function NewAppPage() {
           <input className="mt-1 block" type="file" name="icon" accept="image/png,image/jpeg,image/webp" required />
         </label>
         <label className="block text-sm">
-          一句话介绍（{graphemeLength(tagline)}/30）
+          描述（{graphemeLength(tagline)}/30）
           <input
             className="mt-1 w-full rounded border border-line px-3 py-2"
             name="tagline"
             required
             value={tagline}
             onChange={(e) => setTagline(e.target.value)}
+            placeholder="列表卡片上展示"
           />
         </label>
         <label className="block text-sm">
@@ -61,18 +63,6 @@ export function NewAppPage() {
             ))}
           </select>
         </label>
-        <label className="block text-sm">
-          系统（创建后不可改，选错只能再建模）
-          <select className="mt-1 w-full rounded border border-line px-3 py-2" name="platform" required>
-            {PLATFORMS.map((p) => (
-              <option key={p} value={p}>
-                {PLATFORM_LABELS[p]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <Field name="storeUrl" label="商店链接" required placeholder="https://" />
-        <Field name="deeplink" label="自定义跳转（可选）" />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <button className="rounded bg-brand px-4 py-2 text-white disabled:opacity-50" disabled={busy} type="submit">
           {busy ? "提交中…" : "创建"}

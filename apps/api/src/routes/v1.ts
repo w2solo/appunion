@@ -3,6 +3,7 @@ import { and, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   apiKeys,
+  appPlatforms,
   apps,
   clickEvents,
   getConfig,
@@ -14,7 +15,9 @@ import {
   IMPRESSION_BATCH_MAX,
   LIST_DEFAULT_PAGE_SIZE,
   LIST_MAX_PAGE_SIZE,
+  PLATFORMS,
   RECOMMEND_MAX,
+  type Platform,
 } from "@appunions/shared";
 import { db } from "../db.js";
 import { sendError } from "../errors.js";
@@ -71,27 +74,45 @@ function isHost(v: Awaited<ReturnType<typeof hostFromKey>>): v is Host {
   return !("error" in v);
 }
 
-function dto(app: Host) {
+function dto(app: Host, platform: Platform, packageName: string) {
   return {
     id: app.id,
     name: app.name,
     icon_url: app.iconUrl,
     tagline: app.tagline,
     category: app.category,
-    platform: app.platform,
-    store_url: app.storeUrl,
-    deeplink: app.deeplink,
+    platform,
+    package_name: packageName,
   };
 }
 
-async function poolIds(platform: string, cacheSec: number) {
+async function hostHasPlatform(hostId: string, platform: Platform) {
+  const rows = await db
+    .select({ id: appPlatforms.id })
+    .from(appPlatforms)
+    .where(and(eq(appPlatforms.appId, hostId), eq(appPlatforms.platform, platform)))
+    .limit(1);
+  return Boolean(rows[0]);
+}
+
+async function listingFor(appId: string, platform: Platform) {
+  const rows = await db
+    .select()
+    .from(appPlatforms)
+    .where(and(eq(appPlatforms.appId, appId), eq(appPlatforms.platform, platform)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
+async function poolIds(platform: Platform, cacheSec: number) {
   const cacheKey = `pool:${platform}`;
   const cached = await redis.get(cacheKey);
   if (cached) return JSON.parse(cached) as string[];
   const rows = await db
     .select({ id: apps.id })
     .from(apps)
-    .where(and(eq(apps.platform, platform), eq(apps.inRecommendPool, true)));
+    .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
+    .where(and(eq(appPlatforms.platform, platform), eq(apps.inRecommendPool, true)));
   const ids = rows.map((r) => r.id);
   await redis.set(cacheKey, JSON.stringify(ids), "EX", cacheSec);
   return ids;
@@ -101,20 +122,41 @@ export async function v1Routes(app: FastifyInstance) {
   app.get("/v1/apps/recommend", async (request, reply) => {
     const host = await hostFromKey(request);
     if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
+    const q = z
+      .object({
+        platform: z.enum(PLATFORMS),
+        limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).default(RECOMMEND_MAX),
+      })
+      .safeParse(request.query);
+    if (!q.success) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform（android / ios / harmonyos）");
+    }
+    if (!(await hostHasPlatform(host.id, q.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
     const config = await getConfig(db);
     if (!(await rateLimit(`rec:${host.id}`, config.rateRecommendPerMin))) {
       return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
-    const q = z
-      .object({ limit: z.coerce.number().int().min(1).max(RECOMMEND_MAX).default(RECOMMEND_MAX) })
-      .safeParse(request.query);
-    const limit = q.success ? q.data.limit : RECOMMEND_MAX;
-    const ids = (await poolIds(host.platform, config.recommendCacheSeconds)).filter((id) => id !== host.id);
+    const { platform, limit } = q.data;
+    const ids = (await poolIds(platform, config.recommendCacheSeconds)).filter((id) => id !== host.id);
     const picked = pickRandom(ids, limit);
     const rows =
-      picked.length === 0 ? [] : await db.select().from(apps).where(inArray(apps.id, picked));
-    const byId = new Map(rows.map((r) => [r.id, r]));
-    const items = picked.map((id) => byId.get(id)).filter((r): r is Host => Boolean(r)).map(dto);
+      picked.length === 0
+        ? []
+        : await db
+            .select({ app: apps, packageName: appPlatforms.packageName })
+            .from(apps)
+            .innerJoin(
+              appPlatforms,
+              and(eq(appPlatforms.appId, apps.id), eq(appPlatforms.platform, platform)),
+            )
+            .where(inArray(apps.id, picked));
+    const byId = new Map(rows.map((r) => [r.app.id, r]));
+    const items = picked
+      .map((id) => byId.get(id))
+      .filter((r): r is (typeof rows)[number] => Boolean(r))
+      .map((r) => dto(r.app, platform, r.packageName));
     await rememberRecent(
       host.id,
       items.map((i) => i.id),
@@ -125,40 +167,49 @@ export async function v1Routes(app: FastifyInstance) {
   app.get("/v1/apps", async (request, reply) => {
     const host = await hostFromKey(request);
     if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
-    const config = await getConfig(db);
-    if (!(await rateLimit(`list:${host.id}`, config.rateListPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
-    }
     const q = z
       .object({
+        platform: z.enum(PLATFORMS),
         page: z.coerce.number().int().min(1).default(1),
         page_size: z.coerce.number().int().min(1).max(LIST_MAX_PAGE_SIZE).default(LIST_DEFAULT_PAGE_SIZE),
       })
       .safeParse(request.query);
-    if (!q.success) return sendError(reply, 400, ERROR_CODES.invalid_params, "Invalid pagination");
-    const { page, page_size } = q.data;
+    if (!q.success) return sendError(reply, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
+    if (!(await hostHasPlatform(host.id, q.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    const config = await getConfig(db);
+    if (!(await rateLimit(`list:${host.id}`, config.rateListPerMin))) {
+      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    }
+    const { platform, page, page_size } = q.data;
     const where = and(
-      eq(apps.platform, host.platform),
+      eq(appPlatforms.platform, platform),
       eq(apps.reviewStatus, "approved"),
       eq(apps.pausedByDeveloper, false),
       eq(apps.pausedByOps, false),
       ne(apps.id, host.id),
     );
-    const countRows = await db.select({ n: sql<number>`count(*)::int` }).from(apps).where(where);
+    const countRows = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(apps)
+      .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
+      .where(where);
     const total = countRows[0]?.n ?? 0;
     const rows = await db
-      .select()
+      .select({ app: apps, packageName: appPlatforms.packageName })
       .from(apps)
+      .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
       .where(where)
       .orderBy(desc(apps.createdAt), desc(apps.id))
       .limit(page_size)
       .offset((page - 1) * page_size);
     await rememberRecent(
       host.id,
-      rows.map((r) => r.id),
+      rows.map((r) => r.app.id),
     );
     return {
-      items: rows.map(dto),
+      items: rows.map((r) => dto(r.app, platform, r.packageName)),
       page,
       page_size,
       total,
@@ -168,9 +219,9 @@ export async function v1Routes(app: FastifyInstance) {
   app.post("/v1/events/impressions", async (request, reply) => {
     const host = await hostFromKey(request);
     if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
-    const config = await getConfig(db);
     const body = z
       .object({
+        platform: z.enum(PLATFORMS),
         client_id: z.string().uuid(),
         impressions: z
           .array(
@@ -187,6 +238,10 @@ export async function v1Routes(app: FastifyInstance) {
     if (!body.success) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "Invalid impression payload");
     }
+    if (!(await hostHasPlatform(host.id, body.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    const config = await getConfig(db);
     if (!(await rateLimit(`imp:${host.id}`, config.rateImpressionsPerMin))) {
       return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
@@ -204,7 +259,8 @@ export async function v1Routes(app: FastifyInstance) {
         results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "not_visible_in_catalog" });
         continue;
       }
-      if (target.platform !== host.platform) {
+      const listing = await listingFor(item.app_id, body.data.platform);
+      if (!listing) {
         results.push({ app_id: item.app_id, idempotency_key: item.idempotency_key, accepted: false, reason: "platform_mismatch" });
         continue;
       }
@@ -257,12 +313,9 @@ export async function v1Routes(app: FastifyInstance) {
   app.post("/v1/events/clicks", async (request, reply) => {
     const host = await hostFromKey(request);
     if (!isHost(host)) return sendError(reply, host.status, host.code, host.message);
-    const config = await getConfig(db);
-    if (!(await rateLimit(`clk:${host.id}`, config.rateClicksPerMin))) {
-      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
-    }
     const body = z
       .object({
+        platform: z.enum(PLATFORMS),
         client_id: z.string().uuid(),
         app_id: z.string().uuid(),
         idempotency_key: z.string().uuid(),
@@ -271,11 +324,19 @@ export async function v1Routes(app: FastifyInstance) {
     if (!body.success) {
       return sendError(reply, 400, ERROR_CODES.invalid_params, "Invalid click payload");
     }
-    const { client_id, app_id, idempotency_key } = body.data;
+    if (!(await hostHasPlatform(host.id, body.data.platform))) {
+      return sendError(reply, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    const config = await getConfig(db);
+    if (!(await rateLimit(`clk:${host.id}`, config.rateClicksPerMin))) {
+      return sendError(reply, 429, ERROR_CODES.rate_limited, "Rate limited");
+    }
+    const { platform, client_id, app_id, idempotency_key } = body.data;
     if (app_id === host.id) return { accepted: false, reason: "self" };
     const targets = await db.select().from(apps).where(eq(apps.id, app_id)).limit(1);
     const target = targets[0];
-    if (!target || target.platform !== host.platform || !isCatalogVisible(target)) {
+    const listing = await listingFor(app_id, platform);
+    if (!target || !listing || !isCatalogVisible(target)) {
       return { accepted: false, reason: "not_visible_in_catalog" };
     }
     const existing = await db

@@ -161,7 +161,7 @@ flowchart TD
 ### 6.2 运营审核
 
 1. 进 `/ops/review`，默认筛 `pending`。
-2. 打开详情：图标、名称、简介、端、商店链接（新标签打开）、deeplink、开发者邮箱。
+2. 打开详情：图标、名称、简介、各端包名、开发者邮箱。
 3. 通过 / 拒绝（拒绝必须填原因）/ 暂停（必须填原因）。
 4. 回到队列，下一条。
 
@@ -215,7 +215,7 @@ flowchart TD
 
 空态：还没有 App，主按钮「创建应用」。
 
-接口：`GET /dashboard/apps`。若列表不带近 7 天曝光，详情再查；列表接口应带摘要字段，避免 N+1。**后端列表响应需包含**：`id, name, icon_url, platform, review_status, paused_by_developer, paused_by_ops, in_recommend_pool, grace_days_left, impressions_received_7d`。
+接口：`GET /dashboard/apps`。若列表不带近 7 天曝光，详情再查；列表接口应带摘要字段，避免 N+1。**后端列表响应需包含**：`id, name, icon_url, platforms, review_status, paused_by_developer, paused_by_ops, in_recommend_pool, grace_days_left, impressions_received_7d`。
 
 ### 7.4 创建应用 `/apps/new`
 
@@ -224,14 +224,11 @@ flowchart TD
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
 | 名称 | 是 | |
-| 图标 | 是 | png/jpeg/webp，≤ 512KB，先本地预览，提交时 `POST .../icon` 或创建接口支持 multipart |
-| 一句话介绍 | 是 | 实时数汉字，上限 30 |
+| 图标 | 是 | png/jpeg/webp，≤ 512KB，创建接口支持 multipart |
+| 描述 | 是 | 实时数字数，上限 30 |
 | 分类 | 是 | 下拉，文案用中文，值用后端枚举 |
-| 系统 | 是 | Android / iOS / 鸿蒙，创建后不可改，旁边写一句「选错只能再建模」 |
-| 商店链接 | 是 | URL |
-| 自定义跳转 | 否 | 占位符按端变化（deeplink / want） |
 
-提交：`POST /dashboard/apps` → 成功进密钥模态框 → 确认后去 `/apps/:id`。
+提交：`POST /dashboard/apps` → 成功进密钥模态框 → 确认后去 `/apps/:id`，在详情页勾选平台并填写包名。
 
 失败：校验错误贴在字段下；500 用页顶提示。
 
@@ -254,7 +251,11 @@ flowchart TD
 
 **资料**
 
-与创建表单相同，系统字段只读。保存 `PATCH /dashboard/apps/:id`。拒绝态保存后走 `POST .../resubmit`（或保存即重提，按钮文案写成「保存并重新提交」）。
+与创建表单相同。保存 `PATCH /dashboard/apps/:id`。拒绝态保存后走 `POST .../resubmit`（或保存即重提，按钮文案写成「保存并重新提交」）。
+
+**支持的平台**
+
+勾选 Android / iOS / 鸿蒙，每端填写包名。`PUT /dashboard/apps/:id/platforms` 覆盖保存。未配置任何端则无法进入推荐/全量列表。
 
 **凭证**
 
@@ -266,7 +267,7 @@ flowchart TD
 
 - 暂停 / 恢复。运营暂停时禁用恢复，提示联系运营。
 
-接口：`GET /dashboard/apps/:id`、`PATCH`、`resubmit`、`pause`、`resume`、`api-key/rotate`、`icon`。
+接口：`GET /dashboard/apps/:id`、`PATCH`、`PUT .../platforms`、`resubmit`、`pause`、`resume`、`api-key/rotate`、`icon`。
 
 ### 7.6 数据 `/apps/:id/stats`
 
@@ -285,7 +286,7 @@ flowchart TD
 
 必须有四章（对应 PRD 支柱 C）：
 
-1. **接入步骤**：注册 → 建 App → 等审核 → 拿 key → 拉推荐 → 可视区报曝光 → 点击后上报再跳转。
+1. **接入步骤**：注册 → 建 App → 填各端包名 → 等审核 → 拿 key → 带 `platform` 拉推荐 → 可视区报曝光 → 点击后上报再用 `package_name` 打开商店。
 2. **API**：Base URL、鉴权、四个接口的请求/响应/错误码。从 `packages/shared` 生成或手写，但要和实现一致。
 3. **规则**：同端、排除自己、观察期 7 天、近 7 天 100 次贡献曝光、开发者暂停 vs 运营暂停。
 4. **样式参考**：卡片 = 图标 + 名称 + 一句话 + 按钮；「换一批」打 recommend；「查看全部」打分页全量。标明「不是强制组件，但曝光点击必须报」。给一张线框示意（静态图即可）。

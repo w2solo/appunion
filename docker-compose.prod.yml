@@ -1,0 +1,144 @@
+name: appunions
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+  target: app
+
+x-app-env: &app-env
+  TZ: ${TZ:-Asia/Shanghai}
+  DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://redis:6379
+  API_PORT: "3000"
+  JWT_SECRET: ${JWT_SECRET}
+  COOKIE_SECURE: ${COOKIE_SECURE:-true}
+  AUTH_ECHO_CODE: ${AUTH_ECHO_CODE:-false}
+  S3_ENDPOINT: ${S3_ENDPOINT:-http://127.0.0.1:9000}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-local}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-local}
+  S3_BUCKET: ${S3_BUCKET:-appunions}
+  S3_PUBLIC_URL: ${S3_PUBLIC_URL:-http://127.0.0.1:9000/appunions}
+  SENDCLOUD_API_USER: ${SENDCLOUD_API_USER:-}
+  SENDCLOUD_API_KEY: ${SENDCLOUD_API_KEY:-}
+  SENDCLOUD_FROM: ${SENDCLOUD_FROM:-}
+  SENDCLOUD_FROM_NAME: ${SENDCLOUD_FROM_NAME:-AppUnions}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    logging: *default-logging
+
+  migrate:
+    image: appunions-app:local
+    build: *app-build
+    command: pnpm --filter @appunions/db migrate
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  api:
+    image: appunions-app:local
+    build: *app-build
+    command: pnpm --filter @appunions/api start
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    volumes:
+      - icons:/app/data/icons
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    logging: *default-logging
+
+  worker:
+    image: appunions-app:local
+    build: *app-build
+    command: pnpm --filter @appunions/worker start
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *default-logging
+
+  web:
+    image: appunions-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PUBLISH_PORT:-18080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  redisdata:
+  icons:

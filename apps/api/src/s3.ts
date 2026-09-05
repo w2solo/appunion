@@ -23,6 +23,10 @@ export const s3 = new S3Client({
 });
 
 export async function ensureBucket() {
+  if (useLocal) {
+    mkdirSync(localDir, { recursive: true });
+    return;
+  }
   const attempt = (async () => {
     try {
       await s3.send(new HeadBucketCommand({ Bucket: env.S3_BUCKET }));

@@ -15,7 +15,7 @@ import { dashboardAppRoutes } from "./routes/dashboard-apps.js";
 import { adminRoutes } from "./routes/admin.js";
 import { v1Routes } from "./routes/v1.js";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, trustProxy: true });
 
 await app.register(cookie);
 await app.register(multipart, { limits: { fileSize: 512 * 1024 } });

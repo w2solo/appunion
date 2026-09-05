@@ -19,7 +19,7 @@ pnpm dev
 - Postgres：本机 `55432`（避免和常见的 5432 冲突）
 - 图标：MinIO 不可用时会存到仓库 `data/icons`，经 `/media/icons` 访问
 
-默认超级管理员邮箱固定为 `cmlanche@qq.com`。用这个邮箱登录后，左侧会出现「审核 / 异常 / 设置 / 管理员」。普通管理员由超管在「管理员」页搜索已注册用户后标记，只能审核和改门槛参数，不能再管管理员。登录走邮箱验证码，不用密码。本地没配 SMTP 时，页面上会直接显示验证码。
+默认超级管理员邮箱固定为 `cmlanche@qq.com`。用这个邮箱登录后，左侧会出现「审核 / 异常 / 设置 / 管理员」。普通管理员由超管在「管理员」页搜索已注册用户后标记，只能审核和改门槛参数，不能再管管理员。登录走邮箱验证码，不用密码。发信走 [SendCloud](https://www.sendcloud.net/)（`SENDCLOUD_API_USER` / `SENDCLOUD_API_KEY` / `SENDCLOUD_FROM`）。没配时页面上会直接显示验证码。
 
 ## 演示路径
 
@@ -33,6 +33,16 @@ curl -s 'http://localhost:3000/v1/apps/recommend?platform=android' \
 ```
 
 上报曝光 / 点击时必须带设备上持久化的 `client_id`（UUID）。卡片进入可视区后再报曝光。
+
+## 生产部署（Ubuntu + 1Panel）
+
+一键拉起 Postgres / Redis / API / Worker / Web，域名和证书交给 1Panel 反代：
+
+```bash
+bash deploy/install.sh
+```
+
+说明见 [DEPLOY.md](DEPLOY.md)。
 
 ## 仓库
 

@@ -18,6 +18,7 @@ import {
   ICON_MAX_BYTES,
   LIST_DEFAULT_PAGE_SIZE,
   LIST_MAX_PAGE_SIZE,
+  LIST_SIZE_DEFAULT,
   LIST_SIZE_MAX,
   LIST_SIZE_MIN,
   PLATFORMS,
@@ -231,6 +232,7 @@ export async function dashboardAppRoutes(app: FastifyInstance) {
           tagline,
           category: pair.category,
           subcategory: pair.subcategory,
+          listSize: LIST_SIZE_DEFAULT,
         })
         .returning();
       const key = generateApiKey();

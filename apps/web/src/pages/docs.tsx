@@ -113,7 +113,7 @@ export function DocsUi() {
       </p>
       <div className="mx-auto mt-6 max-w-[360px]">
         <RecommendListPanel
-          items={[1, 2, 3, 4, 5].map((n) => ({
+          items={Array.from({ length: 10 }, (_, i) => i + 1).map((n) => ({
             id: String(n),
             name: `示例应用 ${n}`,
             tagline: "一句话介绍不超过三十个字",

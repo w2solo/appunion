@@ -21,6 +21,7 @@ import {
 } from "@appunions/shared";
 import { getDb } from "../db.js";
 import { readJson, type AppEnv } from "../context.js";
+import type { Env } from "../env.js";
 import { sendError } from "../errors.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import { isMockAppId, mockList, mockRecommend } from "../lib/mock-catalog.js";

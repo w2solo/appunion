@@ -1,3 +1,5 @@
+import type { Env } from "../env.js";
+
 export async function sendLoginCode(env: Env, email: string, code: string) {
   if (!env.SENDCLOUD_API_USER || !env.SENDCLOUD_API_KEY || !env.SENDCLOUD_FROM) {
     return false;

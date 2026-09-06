@@ -2,19 +2,20 @@
   "name": "appunions",
   "private": true,
   "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "pnpm --parallel --filter @appunions/api --filter @appunions/web dev",
     "dev:api": "pnpm --filter @appunions/api dev",
     "dev:web": "pnpm --filter @appunions/web dev",
-    "db:migrate": "wrangler d1 migrations apply appunions --local",
-    "db:migrate:remote": "wrangler d1 migrations apply appunions --remote",
-    "cf:types": "wrangler types",
+    "db:migrate": "pnpm --filter @appunions/api migrate",
     "test": "pnpm --filter @appunions/api test",
     "build": "pnpm --filter @appunions/web build",
-    "deploy": "pnpm --filter @appunions/web build && wrangler d1 migrations apply appunions --remote && wrangler deploy"
+    "start": "pnpm --filter @appunions/api start"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "wrangler": "^4.34.0"
+    "drizzle-kit": "^0.30.4"
   }
 }

@@ -8,9 +8,18 @@ function normalize(value: string) {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function errorCode(err: unknown): string | undefined {
+  if (typeof err === "object" && err && "code" in err && typeof err.code === "string") {
+    return err.code;
+  }
+  if (err instanceof Error && err.cause) return errorCode(err.cause);
+  return undefined;
+}
+
 export function isUniqueViolation(err: unknown) {
+  if (errorCode(err) === "23505") return true;
   const msg = err instanceof Error ? `${err.message} ${err.cause ?? ""}` : String(err);
-  return /UNIQUE constraint failed/i.test(msg) || /constraint failed/i.test(msg);
+  return /UNIQUE constraint failed/i.test(msg) || /duplicate key/i.test(msg) || /constraint failed/i.test(msg);
 }
 
 export async function listCategoryTree(db: AppDb): Promise<CategoryNode[]> {

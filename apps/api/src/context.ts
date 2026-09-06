@@ -1,4 +1,4 @@
-import type { AppDb } from "@appunions/db";
+import type { Env } from "./env.js";
 
 export type AuthUser = {
   id: string;
@@ -19,7 +19,7 @@ export function flagEnabled(value: string | undefined) {
 }
 
 export function clientIp(c: { req: { header: (name: string) => string | undefined } }) {
-  return c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  return c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "unknown";
 }
 
 export async function readJson(c: { req: { json: () => Promise<unknown> } }) {

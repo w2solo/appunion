@@ -8,6 +8,7 @@ import {
   refreshRecommendPool,
 } from "@appunions/db";
 import { getDb } from "./db.js";
+import type { Env } from "./env.js";
 import { invalidatePoolCache } from "./kv.js";
 
 async function runPool(env: Env) {

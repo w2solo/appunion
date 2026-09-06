@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appunions
+      POSTGRES_PASSWORD: appunions
+      POSTGRES_DB: appunions
+    ports:
+      - "55432:5432"
+    volumes:
+      - appunions-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appunions -d appunions"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  appunions-pg:

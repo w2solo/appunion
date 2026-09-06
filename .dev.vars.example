@@ -1,7 +1,0 @@
-JWT_SECRET=dev-secret-change-me
-COOKIE_SECURE=false
-AUTH_ECHO_CODE=true
-SENDCLOUD_FROM_NAME=AppUnions
-# SENDCLOUD_API_USER=
-# SENDCLOUD_API_KEY=
-# SENDCLOUD_FROM=noreply@your-domain.com

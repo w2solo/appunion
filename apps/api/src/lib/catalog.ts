@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { appPlatforms, apps, getConfig, type AppDb } from "@appunions/db";
 import { type Platform } from "@appunions/shared";
 import { pickRandom } from "./random.js";
+import type { CacheStore } from "../cache.js";
 import { cacheGet, cacheSet } from "../kv.js";
 
 type AppRow = typeof apps.$inferSelect;
@@ -28,7 +29,7 @@ export async function hostHasPlatform(db: AppDb, hostId: string, platform: Platf
   return Boolean(rows[0]);
 }
 
-async function poolIds(db: AppDb, kv: KVNamespace, platform: Platform, cacheSec: number) {
+async function poolIds(db: AppDb, kv: CacheStore, platform: Platform, cacheSec: number) {
   const cacheKey = `pool:${platform}`;
   const cached = await cacheGet(kv, cacheKey);
   if (cached) return JSON.parse(cached) as string[];
@@ -44,7 +45,7 @@ async function poolIds(db: AppDb, kv: KVNamespace, platform: Platform, cacheSec:
 
 export async function recommendItems(
   db: AppDb,
-  kv: KVNamespace,
+  kv: CacheStore,
   hostId: string,
   platform: Platform,
   limit: number,

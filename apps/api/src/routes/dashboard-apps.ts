@@ -37,7 +37,7 @@ import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import { mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { mustUser, requireUser } from "../lib/session.js";
 import { invalidatePoolCache } from "../kv.js";
-import { uploadIcon } from "../r2.js";
+import { uploadIcon } from "../icons.js";
 import { utcDay } from "../lib/stats.js";
 
 const patchSchema = z.object({

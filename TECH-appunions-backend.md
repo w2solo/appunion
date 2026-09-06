@@ -6,7 +6,7 @@
 | 完整设计 | [TECH-appunions.md](TECH-appunions.md)（Web 后台、文档站、运营台、部署） |
 | 范围 | 后端：开放 API、开发者后台 API、运营审核、统计、推荐池、基础反作弊 |
 | 不在本文 | Web 页面交互、接入文档正文、样式参考稿（见完整设计） |
-| 状态 | 待评审（技术栈已确认：Cloudflare Workers + D1 + KV + R2） |
+| 状态 | 待评审（技术栈已确认：Node + Hono + PostgreSQL，部署在 Render） |
 
 本文给后端评审用。整站怎么拼、有哪些页面，看完整设计。先看第 1 节选型，再看第 4 节模型和第 6～8 节三条主链路。文末是待拍板的决策。
 
@@ -35,24 +35,24 @@ V1 后端要同时撑住三件事：
 
 | 层 | 选择 | 原因 |
 | --- | --- | --- |
-| 运行时 | Cloudflare Workers | 不再自建 1Panel / Node 长进程 |
+| 运行时 | Node.js 22 长进程 | Render Web Service，同时托管 API 和静态资源 |
 | 语言 | TypeScript | 和后台前端同语言，接口类型可共享 |
-| HTTP | Hono | Workers 上的轻量路由，和 Fetch API 对齐 |
-| 主库 | D1 | SQLite，和 Worker 同进程绑定 |
-| 缓存 / 限流 | KV | 验证码、限流、推荐池 ID 列表 |
-| 对象存储 | R2 | App 图标 |
+| HTTP | Hono + `@hono/node-server` | 轻量路由，和 Fetch API 对齐 |
+| 主库 | PostgreSQL | Render 托管库，备份与连接串现成 |
+| 缓存 / 限流 | 进程内 TTL Map | 单实例够用；V1 不加 Redis |
+| 对象存储 | Persistent Disk | App 图标；Render 尚无一等对象存储 |
 | 开发者登录 | 邮箱验证码，JWT（access 15min + refresh 30d，httpOnly cookie） | V1 不做 SSO、不做团队成员 |
 | 开放 API 鉴权 | 查询参数 `app_id`（宿主 UUID） | 客户端直连，不需要 API Key |
-| 后台任务 | 同一 Worker 的 Cron Triggers | 量小，先不引入独立队列 |
+| 后台任务 | 同一进程的 node-cron | 量小，先不引入独立队列 |
 | ORM | Drizzle | schema 即文档，迁移可读 |
 | 校验 | Zod | 请求体、查询参数统一校验 |
 
-部署形态：一个 Worker 同时托管 `apps/web` 静态资源和 API。生产同一域名：`/v1`、`/dashboard`、`/admin`、`/health`、`/media` 进 Hono，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。
+部署形态：一个 Node 进程同时托管 `apps/web` 静态资源和 API。生产同一域名：`/v1`、`/dashboard`、`/admin`、`/health`、`/media` 进 Hono，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。单实例：磁盘和图标、进程内缓存都不能水平扩 Web。
 
 **明确不选（V1）**
 
-- Cloudflare 以外的自建 VPS / 1Panel：生产只跑在 Workers + D1 + KV + R2。
-- Kafka / SQS / ClickHouse：日 10 万事件量级用不上。
+- Cloudflare Workers / D1 / KV / R2：生产只跑在 Render Node + Postgres + Disk。
+- Redis / Kafka / SQS / ClickHouse：日 10 万事件量级用不上。
 - 带 UI 的 SDK、安装归因、设备指纹。
 - 多租户分库、读写分离。
 
@@ -75,12 +75,12 @@ flowchart TB
   end
 
   subgraph data [数据]
-    PG[(D1)]
-    Redis[(KV)]
-    S3[R2]
+    PG[(PostgreSQL)]
+    Redis[进程内缓存]
+    S3[Persistent Disk]
   end
 
-  Worker[Cron]
+  Worker[node-cron]
 
   Mobile --> OpenAPI
   Web --> DashAPI
@@ -129,7 +129,7 @@ erDiagram
 | 列 | 类型 | 说明 |
 | --- | --- | --- |
 | id | uuid PK | |
-| email | citext unique | 登录名 |
+| email | text unique | 登录名，应用层转小写 |
 | password_hash | text | |
 | role | text | `developer` / `admin`，V1 运营账号也放这张表 |
 | created_at | timestamptz | |
@@ -477,7 +477,7 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 2. 窗口：过去 `impression_dedup_minutes`（默认 30）内，同一 `(host, target, client_id)` 已有有效曝光 → `duplicate`。
 3. 通过则插入 `impression_events`，并 upsert 当天 `app_daily_stats`（host 的 given +1，target 的 received +1）。
 
-实现：窗口去重用 KV，key = `imp:{host}:{target}:{client}`，TTL = 去重分钟。同时写 D1。KV 说重复则不写库；D1 唯一约束挡住重试双写。
+实现：窗口去重用进程内缓存，key = `imp:{host}:{target}:{client}`，TTL = 去重分钟。同时写 Postgres。缓存说重复则不写库；库唯一约束挡住重试双写。
 
 ### 8.3 点击校验
 
@@ -486,7 +486,7 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 1. 目标同端、不是自己、当前可见（在全量列表口径里）。
 2. 幂等 key 未用过。
 3. 该 `client_id` 在 24h 内对该 target 有有效曝光。
-4. target 出现在该宿主最近 3 次 recommend/list 下发集合里（Redis `recent:{host}`）。list 分页请求也要把当页 ID 并入这个集合。
+4. target 出现在该宿主最近 3 次 recommend/list 下发集合里（缓存 `recent:{host}`）。list 分页请求也要把当页 ID 并入这个集合。
 5. 通过则写 `click_events`，双方日统计 `clicks_* + 1`。
 
 第 4 条用来挡「随便报一个联盟里的 app_id」。第 3 条用来挡「没展示就点击」。
@@ -596,8 +596,8 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 | 曝光 / 点击接受 | 单事务：插事件 + upsert 日统计 |
 | 重置 key | 单事务：旧行 revoke + 插入新哈希 |
 | 审核通过 | 单事务：改 apps + 插 app_reviews + 置 in_recommend_pool |
-| 池缓存 | DB 提交成功后再删 Redis。缓存允许 30s 脏，可接受 |
-| Redis 去重 vs PG | PG 唯一约束是真相；Redis 只是加速窗口去重 |
+| 池缓存 | DB 提交成功后再删进程内缓存。缓存允许 30s 脏，可接受 |
+| 缓存去重 vs PG | PG 唯一约束是真相；内存 TTL 只是加速窗口去重 |
 
 日统计若和明细不一致：worker 每天凌晨用明细重算昨天（及前天，防跨日延迟）。看板以 `app_daily_stats` 为准。
 
@@ -609,7 +609,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 - `api_key` 只存哈希；日志、错误信息、看板都只打 `key_prefix`。
 - 开放 API 不返回其他开发者的邮箱、暂停原因、统计。
 - 图标：服务端转存，不信客户端传来的外链当主图（创建时也可以先填 URL，但 V1 只允许上传，避免 SSRF 去拉图）。
-- CORS：`/v1` 对浏览器开放 `Access-Control-Allow-Origin: *`（客户端直连，无密钥）。`/dashboard` 生产同域，不依赖跨域。开发环境由 Vite 代理到 `wrangler dev`。
+- CORS：`/v1` 对浏览器开放 `Access-Control-Allow-Origin: *`（客户端直连，无密钥）。`/dashboard` 生产同域，不依赖跨域。开发环境由 Vite 代理到 Node API。
 - 限流对开放 API 必须有；登录接口按 IP + email 限流，防爆破。
 - 管理接口不暴露到文档站点。
 - 不在客户端 bundle 任何服务端密钥。
@@ -629,7 +629,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 - `pool_size{platform}`
 - `pending_review_count`
 
-健康检查：`GET /health` 查 D1。
+健康检查：`GET /health` 查 PostgreSQL。
 
 ---
 
@@ -655,8 +655,8 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 
 ```
 apps/web          Vite React：开发者后台、文档、运营台
-apps/api          Hono Worker：/v1 /dashboard /admin + Cron
-packages/db       Drizzle schema + D1 迁移
+apps/api          Hono Node：/v1 /dashboard /admin + Cron
+packages/db       Drizzle schema + Postgres 迁移
 packages/shared   Zod 类型、分类枚举、错误码
 ```
 
@@ -683,6 +683,6 @@ packages/shared   Zod 类型、分类枚举、错误码
 
 **已拍板（不再讨论）**
 
-- 后端：Cloudflare Workers + Hono + D1 + KV + R2。
+- 后端：Node + Hono + PostgreSQL，部署在 Render。
 
 D1、D3、D6 对安全和数据质量影响最大，建议先定这三项再写代码。

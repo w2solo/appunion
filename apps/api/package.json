@@ -4,21 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "mkdir -p ../../apps/web/dist && wrangler dev --config ../../wrangler.jsonc --port 8787",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "migrate": "tsx src/migrate.ts",
     "test": "tsx --test src/rules.test.ts"
   },
   "dependencies": {
     "@appunions/db": "workspace:*",
     "@appunions/shared": "workspace:*",
+    "@hono/node-server": "^1.19.0",
+    "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
     "hono": "^4.7.4",
     "jose": "^5.9.6",
+    "node-cron": "^3.0.3",
+    "postgres": "^3.4.5",
+    "tsx": "^4.19.2",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.3",
-    "wrangler": "^4.34.0"
+    "@types/node-cron": "^3.0.11",
+    "typescript": "^5.7.3"
   }
 }

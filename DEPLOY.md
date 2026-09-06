@@ -1,80 +1,66 @@
-# AppUnions 生产部署（Cloudflare Workers）
+# AppUnions 生产部署（Render）
 
-前端静态资源、开放 API、开发者后台 API 和定时任务都跑在同一个 Worker 上。不再需要 1Panel / Docker / 自建 Postgres / Redis。
+前端静态资源、开放 API、开发者后台 API 和定时任务都跑在同一个 Node Web Service 上。数据在 Render PostgreSQL，图标在 Persistent Disk。
 
 ```
-浏览器 ──HTTPS──► Cloudflare Worker（appunions）
+浏览器 ──HTTPS──► Render Web Service（Node）
                     │
-                    ├─ /v1 /dashboard /admin /health /media ──► Hono API
+                    ├─ /v1 /dashboard /admin /health /media /internal ──► Hono API
                     ├─ 其它路径 ──► Vite 构建的 SPA
-                    ├─ D1 业务库
-                    ├─ KV 验证码、限流、推荐池缓存
-                    └─ R2 应用图标
+                    ├─ PostgreSQL 业务库
+                    ├─ 进程内 TTL 缓存（验证码、限流、推荐池）
+                    └─ Persistent Disk 应用图标（/var/data/icons）
 ```
 
-Cron：每 5 分钟刷新推荐池，每 6 小时扫异常 CTR，每天 00:15 UTC 对账昨日统计。
+Cron：同一进程内每 5 分钟刷新推荐池，每 6 小时扫异常 CTR，每天 00:15 UTC 对账昨日统计。Web 实例必须常驻（Persistent Disk 需要付费机型）。
 
 ## 0. 一次性准备
 
-已在仓库里配好 `wrangler.jsonc`，对应账号资源：
-
-| 资源 | 名称 |
-| --- | --- |
-| Worker | `appunions` |
-| D1 | `appunions` |
-| KV | `appunions-cache` |
-| R2 | `appunions-icons` |
-
-本机需要 [Node.js 22+](https://nodejs.org/) 和已登录的 Wrangler：
+仓库根目录已有 `render.yaml`。本机需要 [Node.js 22+](https://nodejs.org/)、pnpm、Docker（只为本地 Postgres）：
 
 ```bash
+cp .env.example .env
+docker compose up -d
 pnpm install
-npx wrangler login
-npx wrangler whoami
+pnpm db:migrate
+pnpm dev
 ```
 
-生产密钥不要写进 git。在仓库根执行（交互输入，不要把值贴进命令行）：
+生产密钥在 Render Dashboard 的 Environment 里配置，不要写进 git。Blueprint 会生成 `JWT_SECRET` 和 `CRON_SECRET`。SendCloud 三项需手动填写后才能给用户发登录验证码；没配时生产环境不会在接口里回显验证码。
 
-```bash
-npx wrangler secret put JWT_SECRET
-npx wrangler secret put SENDCLOUD_API_USER
-npx wrangler secret put SENDCLOUD_API_KEY
-npx wrangler secret put SENDCLOUD_FROM
-```
+## 1. 用 Blueprint 发布
 
-`JWT_SECRET` 至少 8 位，建议随机长串。SendCloud 三项配齐后才能给用户发登录验证码；没配时生产环境不会在接口里回显验证码。
-
-## 1. 发布
-
-```bash
-pnpm run deploy
-```
-
-这条命令会：构建 Web、对远程 D1 跑迁移、把 Worker（含静态资源）推上去。
+1. 把仓库推到 GitHub / GitLab。
+2. Render Dashboard → **New** → **Blueprint**，选中该仓库。
+3. 确认会创建：
+   - Web Service `appunions`（Node 22，Disk 挂载 `/var/data`）
+   - PostgreSQL `appunions-db`
+4. 填 SendCloud 三个环境变量（可稍后补）。
+5. 创建并等待第一次构建。`startCommand` 会先跑迁移再启动 API。
 
 第一次请求会写入默认分类和超级管理员 `cmlanche@qq.com`。
 
 探活：
 
 ```bash
-curl -s https://appunions.<你的子域>.workers.dev/health
+curl -s https://<你的服务>.onrender.com/health
 ```
 
-Wrangler 发布结束时会打印实际 URL。
+Render 控制台会显示实际 URL。
 
 ## 2. 自定义域名
 
-Cloudflare Dashboard → **Workers & Pages** → `appunions` → **Settings** → **Domains & Routes** → **Add**，绑上你的域名（域名需要已经在同一个 Cloudflare 账号下）。
+Render Dashboard → 该 Web Service → **Settings** → **Custom Domains**，按提示加 DNS。HTTPS 由 Render 签发。
 
-绑 HTTPS 域名后保持 `COOKIE_SECURE=true`（`wrangler.jsonc` 里已是默认）。
+绑 HTTPS 域名后保持 `COOKIE_SECURE=true`（`render.yaml` 里已是默认）。
 
 ## 3. 第一次登录
 
-浏览器打开 Worker URL 或自定义域名，用超级管理员邮箱 `cmlanche@qq.com` 收验证码登录。左侧会出现审核 / 异常 / 设置 / 管理员。
+浏览器打开服务 URL 或自定义域名，用超级管理员邮箱 `cmlanche@qq.com` 收验证码登录。左侧会出现审核 / 异常 / 设置 / 管理员。
 
 普通管理员由超管在「管理员」页把已注册用户标上去。
 
-本地没配发信时，`.dev.vars` 里 `AUTH_ECHO_CODE=true`，页面会直接显示验证码。
+本地没配发信时，`.env` 里 `AUTH_ECHO_CODE=true`，页面会直接显示验证码。
 
 ## 4. 日常运维
 
@@ -82,31 +68,31 @@ Cloudflare Dashboard → **Workers & Pages** → `appunions` → **Settings** �
 
 ```bash
 # 本地
+docker compose up -d
 pnpm dev
 
-# 类型（改 wrangler.jsonc 之后）
-pnpm cf:types
+# 迁移
+pnpm db:migrate
 
-# 远程迁移
-pnpm db:migrate:remote
+# 单测
+pnpm test
 
-# 发布
-pnpm run deploy
-
-# 实时日志
-npx wrangler tail appunions
+# 构建前端（生产构建由 Render 执行）
+pnpm build
 ```
 
-改非密钥配置（例如 `AUTH_ECHO_CODE`）编辑 `wrangler.jsonc` 的 `vars` 再 `pnpm run deploy`。改密钥用 `wrangler secret put`。
+改非密钥配置（例如 `AUTH_ECHO_CODE`）在 Render 环境变量里改，会触发重新部署。图标目录是 `/var/data/icons`，不要改成临时盘路径。
+
+可选：用 `CRON_SECRET` 调 `POST /internal/jobs/{pool|anomalies|reconcile}`，方便以后改成独立 Cron Job。V1 默认已在进程内调度。
 
 ## 5. 排查
 
 | 现象 | 处理 |
 | --- | --- |
-| `/health` 返回 503 | D1 没就绪或迁移没跑，执行 `pnpm db:migrate:remote` |
-| 页面开得开，登录没验证码 | 没配 SendCloud secret，看 `wrangler tail` |
+| `/health` 返回 503 | Postgres 没连上或迁移没跑，看 `DATABASE_URL` 和构建日志里的 `pnpm db:migrate` |
+| 页面开得开，登录没验证码 | 没配 SendCloud；本地可开 `AUTH_ECHO_CODE=true` |
 | 登录成功但立刻掉线 | 用了 HTTP 却 `COOKIE_SECURE=true`；自定义域名要用 HTTPS |
-| 图标 404 | 确认 R2 桶 `appunions-icons` 存在，Worker binding 名为 `ICONS` |
-| `wrangler deploy` 找不到 assets | 先 `pnpm --filter @appunions/web build`，或直接 `pnpm run deploy` |
+| 图标 404 | 确认 Disk 挂在 `/var/data`，且 `ICONS_DIR=/var/data/icons` |
+| 构建找不到 pnpm | `package.json` 已声明 `packageManager`；`buildCommand` 会 `corepack enable` |
 
-本地开发用根目录 `.dev.vars`，与生产 secrets 互不影响。
+本地开发用根目录 `.env`，与 Render 环境变量互不影响。本地 Postgres 默认映射 `localhost:55432`。这是单实例部署：不要水平扩 Web Service，进程内缓存和图标磁盘都假定只有一个进程。

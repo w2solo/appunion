@@ -6,5 +6,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", "../../worker-configuration.d.ts"]
+  "include": ["src"]
 }

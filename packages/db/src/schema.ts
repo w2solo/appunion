@@ -1,14 +1,22 @@
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 const id = (name = "id") => text(name).primaryKey().$defaultFn(() => crypto.randomUUID());
 const createdAt = (name = "created_at") =>
-  integer(name, { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date());
-const timestamp = (name: string) => integer(name, { mode: "timestamp_ms" });
-const bool = (name: string, fallback = false) =>
-  integer(name, { mode: "boolean" }).notNull().default(fallback);
+  timestamp(name, { withTimezone: true, mode: "date" }).notNull().$defaultFn(() => new Date());
+const optionalTimestamp = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
+const bool = (name: string, fallback = false) => boolean(name).notNull().default(fallback);
 
-export const developers = sqliteTable(
+export const developers = pgTable(
   "developers",
   {
     id: id(),
@@ -22,7 +30,7 @@ export const developers = sqliteTable(
   }),
 );
 
-export const apps = sqliteTable(
+export const apps = pgTable(
   "apps",
   {
     id: id(),
@@ -38,12 +46,14 @@ export const apps = sqliteTable(
     pausedByDeveloper: bool("paused_by_developer"),
     pausedByOps: bool("paused_by_ops"),
     rejectedReason: text("rejected_reason"),
-    approvedAt: timestamp("approved_at"),
+    approvedAt: optionalTimestamp("approved_at"),
     inRecommendPool: bool("in_recommend_pool"),
     contributedImpressions7d: integer("contributed_impressions_7d").notNull().default(0),
     listSize: integer("list_size").notNull().default(10),
     createdAt: createdAt(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().$defaultFn(() => new Date()),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .notNull()
+      .$defaultFn(() => new Date()),
   },
   (t) => ({
     poolIdx: index("apps_pool_idx").on(t.inRecommendPool),
@@ -51,7 +61,7 @@ export const apps = sqliteTable(
   }),
 );
 
-export const appPlatforms = sqliteTable(
+export const appPlatforms = pgTable(
   "app_platforms",
   {
     id: id(),
@@ -69,7 +79,7 @@ export const appPlatforms = sqliteTable(
   }),
 );
 
-export const apiKeys = sqliteTable(
+export const apiKeys = pgTable(
   "api_keys",
   {
     id: id(),
@@ -79,7 +89,7 @@ export const apiKeys = sqliteTable(
     keyPrefix: text("key_prefix").notNull(),
     keyHash: text("key_hash").notNull(),
     createdAt: createdAt(),
-    revokedAt: timestamp("revoked_at"),
+    revokedAt: optionalTimestamp("revoked_at"),
   },
   (t) => ({
     hashUnique: uniqueIndex("api_keys_hash_uidx").on(t.keyHash),
@@ -89,7 +99,7 @@ export const apiKeys = sqliteTable(
   }),
 );
 
-export const appReviews = sqliteTable("app_reviews", {
+export const appReviews = pgTable("app_reviews", {
   id: id(),
   appId: text("app_id")
     .notNull()
@@ -102,7 +112,7 @@ export const appReviews = sqliteTable("app_reviews", {
   createdAt: createdAt(),
 });
 
-export const impressionEvents = sqliteTable(
+export const impressionEvents = pgTable(
   "impression_events",
   {
     id: id(),
@@ -124,7 +134,7 @@ export const impressionEvents = sqliteTable(
   }),
 );
 
-export const clickEvents = sqliteTable(
+export const clickEvents = pgTable(
   "click_events",
   {
     id: id(),
@@ -145,7 +155,7 @@ export const clickEvents = sqliteTable(
   }),
 );
 
-export const appDailyStats = sqliteTable(
+export const appDailyStats = pgTable(
   "app_daily_stats",
   {
     appId: text("app_id")
@@ -162,7 +172,7 @@ export const appDailyStats = sqliteTable(
   }),
 );
 
-export const categories = sqliteTable(
+export const categories = pgTable(
   "categories",
   {
     id: id(),
@@ -175,7 +185,7 @@ export const categories = sqliteTable(
   }),
 );
 
-export const platformConfig = sqliteTable("platform_config", {
+export const platformConfig = pgTable("platform_config", {
   id: integer("id").primaryKey().default(1),
   graceDays: integer("grace_days").notNull().default(7),
   reciprocityImpressions: integer("reciprocity_impressions").notNull().default(100),
@@ -187,7 +197,7 @@ export const platformConfig = sqliteTable("platform_config", {
   rateClicksPerMin: integer("rate_clicks_per_min").notNull().default(60),
 });
 
-export const anomalyFlags = sqliteTable("anomaly_flags", {
+export const anomalyFlags = pgTable("anomaly_flags", {
   id: id(),
   appId: text("app_id")
     .notNull()
@@ -195,7 +205,7 @@ export const anomalyFlags = sqliteTable("anomaly_flags", {
   type: text("type").notNull(),
   window: text("window").notNull().default("7d"),
   createdAt: createdAt(),
-  resolvedAt: timestamp("resolved_at"),
+  resolvedAt: optionalTimestamp("resolved_at"),
 });
 
 export type Developer = typeof developers.$inferSelect;

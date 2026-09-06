@@ -1,4 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
+import type { CacheStore } from "../cache.js";
 
 const TTL_SEC = 10 * 60;
 
@@ -14,12 +15,12 @@ export function randomOtp() {
   return String(randomInt(0, 1_000_000)).padStart(6, "0");
 }
 
-export async function saveOtp(kv: KVNamespace, secret: string, email: string, code: string) {
+export async function saveOtp(kv: CacheStore, secret: string, email: string, code: string) {
   await kv.put(keyFor(email), hashOtp(secret, email, code), { expirationTtl: TTL_SEC });
   await kv.delete(`authcode:tries:${email}`);
 }
 
-export async function consumeOtp(kv: KVNamespace, secret: string, email: string, code: string) {
+export async function consumeOtp(kv: CacheStore, secret: string, email: string, code: string) {
   const stored = await kv.get(keyFor(email));
   if (!stored) return false;
   const triesKey = `authcode:tries:${email}`;

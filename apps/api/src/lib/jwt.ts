@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { flagEnabled } from "../context.js";
+import type { Env } from "../env.js";
 
 export const ACCESS_COOKIE = "au_access";
 export const REFRESH_COOKIE = "au_refresh";

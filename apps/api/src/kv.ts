@@ -1,10 +1,12 @@
+import type { CacheStore } from "./cache.js";
+
 const KV_MIN_TTL = 60;
 
 function ttl(seconds: number) {
   return Math.max(seconds, KV_MIN_TTL);
 }
 
-export async function rateLimit(kv: KVNamespace, key: string, limit: number, windowSec = 60) {
+export async function rateLimit(kv: CacheStore, key: string, limit: number, windowSec = 60) {
   const bucket = Math.floor(Date.now() / (windowSec * 1000));
   const redisKey = `rl:${key}:${bucket}`;
   const n = Number((await kv.get(redisKey)) ?? "0") + 1;
@@ -12,7 +14,7 @@ export async function rateLimit(kv: KVNamespace, key: string, limit: number, win
   return n <= limit;
 }
 
-export async function rememberRecent(kv: KVNamespace, hostAppId: string, ids: string[]) {
+export async function rememberRecent(kv: CacheStore, hostAppId: string, ids: string[]) {
   const key = `recent:${hostAppId}`;
   const raw = await kv.get(key);
   const list: string[][] = raw ? (JSON.parse(raw) as string[][]) : [];
@@ -20,7 +22,7 @@ export async function rememberRecent(kv: KVNamespace, hostAppId: string, ids: st
   await kv.put(key, JSON.stringify(list.slice(0, 3)), { expirationTtl: ttl(24 * 60 * 60) });
 }
 
-export async function recentUnion(kv: KVNamespace, hostAppId: string): Promise<Set<string>> {
+export async function recentUnion(kv: CacheStore, hostAppId: string): Promise<Set<string>> {
   const key = `recent:${hostAppId}`;
   const raw = await kv.get(key);
   const set = new Set<string>();
@@ -36,7 +38,7 @@ export async function recentUnion(kv: KVNamespace, hostAppId: string): Promise<S
   return set;
 }
 
-export async function invalidatePoolCache(kv: KVNamespace, platform?: string) {
+export async function invalidatePoolCache(kv: CacheStore, platform?: string) {
   if (platform) {
     await kv.delete(`pool:${platform}`);
     return;
@@ -45,7 +47,7 @@ export async function invalidatePoolCache(kv: KVNamespace, platform?: string) {
 }
 
 export async function impressionDedupSet(
-  kv: KVNamespace,
+  kv: CacheStore,
   hostId: string,
   targetId: string,
   clientId: string,
@@ -58,10 +60,10 @@ export async function impressionDedupSet(
   return true;
 }
 
-export async function cacheGet(kv: KVNamespace, key: string) {
+export async function cacheGet(kv: CacheStore, key: string) {
   return kv.get(key);
 }
 
-export async function cacheSet(kv: KVNamespace, key: string, value: string, ttlSec: number) {
+export async function cacheSet(kv: CacheStore, key: string, value: string, ttlSec: number) {
   await kv.put(key, value, { expirationTtl: ttl(ttlSec) });
 }

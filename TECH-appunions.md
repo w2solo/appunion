@@ -34,49 +34,49 @@ flowchart LR
   subgraph host [开发者的 App]
     Native[Android / iOS / 鸿蒙]
   end
-  subgraph cf [Cloudflare]
-    Api[Hono Worker]
+  subgraph render [Render]
+    Api[Hono Node]
   end
-  D1[(D1)]
-  KV[(KV)]
-  R2[(R2)]
+  PG[(PostgreSQL)]
+  Mem[进程内缓存]
+  Disk[Persistent Disk]
 
   Web -->|cookie 登录| Api
   Native -->|query app_id| Api
-  Api --> D1
-  Api --> KV
-  Api --> R2
+  Api --> PG
+  Api --> Mem
+  Api --> Disk
 ```
 
-生产建议 **一个域名**，由 Worker 按路径分流：
+生产建议 **一个域名**，由 Node 进程按路径分流：
 
 | 路径前缀 | 交给谁 | 说明 |
 | --- | --- | --- |
-| `/v1/*` | Hono Worker | 开放 API |
-| `/dashboard/*` | Hono Worker | 开发者后台 API |
-| `/admin/*` | Hono Worker | 运营 API |
-| `/health` | Hono Worker | 探活 |
-| `/media/*` | Hono Worker | R2 图标 |
+| `/v1/*` | Hono | 开放 API |
+| `/dashboard/*` | Hono | 开发者后台 API |
+| `/admin/*` | Hono | 运营 API |
+| `/health` | Hono | 探活 |
+| `/media/*` | Hono | 磁盘图标 |
 | 其它所有路径 | Web 静态资源 | SPA，前端路由 |
 
 因此 **页面路径不要用 `/dashboard`、`/admin`、`/v1`**。页面用 `/apps`、`/docs`、`/ops`。
 
-本地开发：Vite 把上述 API 前缀代理到 `wrangler dev`（`localhost:8787`），前端跑 `localhost:5173`。Cookie 在开发环境设 `SameSite=Lax`；生产同域后同样适用。
+本地开发：Vite 把上述 API 前缀代理到 Node API（`localhost:8787`），前端跑 `localhost:5173`。Cookie 在开发环境设 `SameSite=Lax`；生产同域后同样适用。
 
 ---
 
 ## 3. 技术栈
 
-整站部署在 Cloudflare Workers 上，不再自建 Node 进程。
+整站部署在 Render 上：一个 Node Web Service 托管 API 和静态资源。
 
 | 层 | 选择 |
 | --- | --- |
-| Web | React 18 + TypeScript + Vite + React Router，作为 Worker 静态资源 |
+| Web | React 18 + TypeScript + Vite + React Router，生产由 Node 托管 `dist` |
 | UI | Tailwind CSS + 少量自研后台组件（表格、表单、对话框）。不引入很重的中台套件 |
 | 图表 | 轻量折线图（如 uPlot 或 Recharts），只用于 7/30 天趋势 |
 | 文档 | 仓库内 Markdown，构建时打进前端路由 `/docs/*` |
-| 后端 | Cloudflare Workers + Hono + D1 + KV + R2 |
-| 定时任务 | 同一 Worker 的 Cron Triggers |
+| 后端 | Node + Hono + PostgreSQL + 进程内缓存 + Persistent Disk |
+| 定时任务 | 同一进程的 node-cron |
 | 仓库 | 单仓 monorepo：`apps/web`、`apps/api`、`packages/*` |
 
 Web **不写业务规则**（是否在推荐池、去重、审核状态机都在服务端）。前端只展示接口返回值，并做表单校验、空态、权限显隐。
@@ -385,18 +385,18 @@ apps/web
 
 ```mermaid
 flowchart TB
-  User[浏览器] --> Worker
-  App[宿主 App] --> Worker
-  Worker -->|"/" 静态"| WebDist[apps/web 构建产物]
-  Worker -->|"/v1 /dashboard /admin /health /media"| Hono[Hono]
-  Hono --> D1
-  Hono --> KV
-  Hono --> R2
+  User[浏览器] --> Node
+  App[宿主 App] --> Node
+  Node -->|"/" 静态"| WebDist[apps/web 构建产物]
+  Node -->|"/v1 /dashboard /admin /health /media"| Hono[Hono]
+  Hono --> PG[(PostgreSQL)]
+  Hono --> Mem[进程内缓存]
+  Hono --> Disk[Persistent Disk]
 ```
 
-- Web：`vite build` 出静态文件，由 Worker Static Assets 托管，SPA 回退 `index.html`。
-- API 与 Cron：同一 Worker。
-- 密钥用 `wrangler secret put`，不进前端 bundle。
+- Web：`vite build` 出静态文件，生产由 Node 托管，SPA 回退 `index.html`。
+- API 与 Cron：同一 Node 进程。
+- 密钥用 Render 环境变量，不进前端 bundle。
 
 ---
 
@@ -404,8 +404,8 @@ flowchart TB
 
 ```
 apps/web          Vite React 后台 + 文档
-apps/api          Hono Worker：/v1 /dashboard /admin + Cron
-packages/db       Drizzle schema + D1 迁移
+apps/api          Hono Node：/v1 /dashboard /admin + Cron
+packages/db       Drizzle schema + Postgres 迁移
 packages/shared   Zod、分类枚举、错误码、文档可引用的 API 类型
 ```
 

@@ -37,12 +37,6 @@ createRoot(document.getElementById("root")!).render(
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/403" element={<Forbidden />} />
-            <Route path="/docs" element={<DocsLayout />}>
-              <Route index element={<DocsIndex />} />
-              <Route path="api" element={<DocsApi />} />
-              <Route path="rules" element={<DocsRules />} />
-              <Route path="ui" element={<DocsUi />} />
-            </Route>
           </Route>
           <Route
             element={
@@ -51,6 +45,12 @@ createRoot(document.getElementById("root")!).render(
               </RequireAuth>
             }
           >
+            <Route path="/docs" element={<DocsLayout />}>
+              <Route index element={<DocsIndex />} />
+              <Route path="api" element={<DocsApi />} />
+              <Route path="rules" element={<DocsRules />} />
+              <Route path="ui" element={<DocsUi />} />
+            </Route>
             <Route path="/apps" element={<AppsPage />} />
             <Route path="/apps/new" element={<NewAppPage />} />
             <Route path="/apps/:id" element={<AppDetailPage />} />

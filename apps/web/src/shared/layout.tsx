@@ -11,7 +11,6 @@ export function PublicLayout() {
             AppUnions
           </Link>
           <nav className="flex gap-4 text-sm">
-            <Link to="/docs">文档</Link>
             {user ? <Link to="/apps">控制台</Link> : <Link to="/login">登录</Link>}
           </nav>
         </div>
@@ -60,7 +59,6 @@ export function AppLayout() {
       </aside>
       <div className="flex-1">
         <header className="flex items-center justify-end gap-4 border-b border-line bg-white px-6 py-3 text-sm">
-          <Link to="/docs">文档</Link>
           <span className="text-muted">{user?.email}</span>
           <button
             className="text-brand"

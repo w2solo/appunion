@@ -1,23 +1,33 @@
-import { Link, Outlet } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import { IMPRESSION_BATCH_MAX, LIST_SIZE_MAX, LIST_SIZE_MIN } from "@appunions/shared";
 import { RecommendListPanel } from "../shared/recommend-list-panel";
 
+const TABS = [
+  { to: "/docs", label: "接入步骤", end: true },
+  { to: "/docs/api", label: "API" },
+  { to: "/docs/rules", label: "规则" },
+  { to: "/docs/ui", label: "样式参考" },
+] as const;
+
 export function DocsLayout() {
   return (
-    <div className="mx-auto grid max-w-5xl grid-cols-[180px_1fr] gap-8 px-6 py-10">
-      <nav className="text-sm">
-        <Link className="block py-1" to="/docs">
-          接入步骤
-        </Link>
-        <Link className="block py-1" to="/docs/api">
-          API
-        </Link>
-        <Link className="block py-1" to="/docs/rules">
-          规则
-        </Link>
-        <Link className="block py-1" to="/docs/ui">
-          样式参考
-        </Link>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold">接入文档</h1>
+      <nav className="flex gap-1 border-b border-line">
+        {TABS.map((t) => (
+          <NavLink
+            key={t.to}
+            to={t.to}
+            end={"end" in t ? t.end : false}
+            className={({ isActive }) =>
+              `-mb-px border-b-2 px-4 py-2 text-sm ${
+                isActive ? "border-brand font-medium text-brand" : "border-transparent text-muted"
+              }`
+            }
+          >
+            {t.label}
+          </NavLink>
+        ))}
       </nav>
       <article className="prose-sm max-w-none space-y-4 rounded-lg bg-white p-8 shadow-sm">
         <Outlet />

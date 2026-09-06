@@ -9,9 +9,6 @@ export function HomePage() {
         <a className="rounded bg-brand px-4 py-2 text-white" href="/login">
           登录 / 注册
         </a>
-        <a className="rounded border border-line bg-white px-4 py-2" href="/docs">
-          读文档
-        </a>
       </div>
     </main>
   );

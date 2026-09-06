@@ -49,5 +49,6 @@ cron.schedule("0 */6 * * *", () => void runScheduled("0 */6 * * *", env), cronOp
 cron.schedule("15 0 * * *", () => void runScheduled("15 0 * * *", env), cronOpts);
 
 const port = Number(process.env.PORT || 8787);
-serve({ fetch: (request) => app.fetch(request, env), port });
+const hostname = process.env.HOST || "0.0.0.0";
+serve({ fetch: (request) => app.fetch(request, env), port, hostname });
 console.log(`api listening on http://127.0.0.1:${port}`);

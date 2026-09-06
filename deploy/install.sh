@@ -47,8 +47,21 @@ if grep -q '^JWT_SECRET=CHANGE_ME' "$ENV_FILE" || grep -q '^POSTGRES_PASSWORD=CH
   exit 1
 fi
 
+if [[ "${RESET_DB:-}" == "1" ]]; then
+  red "RESET_DB=1：将删除 Postgres 数据卷。旧 1Panel 库无法自动升级到当前 schema。"
+  "${COMPOSE[@]}" down --remove-orphans
+  docker volume rm appunions_pgdata 2>/dev/null || true
+  docker volume rm appunions_redisdata 2>/dev/null || true
+fi
+
 info "构建并启动 AppUnions..."
-"${COMPOSE[@]}" up -d --build
+if ! "${COMPOSE[@]}" up -d --build --remove-orphans --force-recreate; then
+  red "启动失败。migrate 日志："
+  "${COMPOSE[@]}" logs migrate || true
+  red "若是从旧 1Panel 迁回来，库结构已经对不上，需要清空后再装："
+  red "  RESET_DB=1 bash deploy/install.sh"
+  exit 1
+fi
 
 port="$(grep -E '^PUBLISH_PORT=' "$ENV_FILE" | tail -n1 | cut -d= -f2-)"
 port="${port:-18080}"

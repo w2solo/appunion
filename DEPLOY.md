@@ -57,6 +57,16 @@ bash deploy/install.sh
 
 已经存在的 `deploy/.env` **不会被覆盖**。改配置后重新执行同一条命令即可（等价于更新发布）。
 
+**从旧 1Panel / Cloudflare / Render 迁回来：** 机器上多半还留着旧 Postgres 卷（当时是另一套 schema），以及 `web` / `worker` / `redis` 孤儿容器。直接 `install.sh` 会在 `migrate` 步骤失败。这是一次性清理：
+
+```bash
+cd /opt/appunions
+git pull
+RESET_DB=1 bash deploy/install.sh
+```
+
+这会删掉 `appunions_pgdata`（旧库数据）。CF / Render 上的数据不在这台机的 Docker 卷里。图标卷会保留。之后日常更新不要带 `RESET_DB`。
+
 首次部署后请立刻编辑 `deploy/.env`，填上 `SUPER_ADMIN_EMAIL` 和 SendCloud，再跑一次 `bash deploy/install.sh`。
 
 ---
@@ -171,6 +181,9 @@ docker compose -f docker-compose.prod.yml --env-file deploy/.env exec -T postgre
 
 | 现象 | 处理 |
 | --- | --- |
+| `migrate` exit 1 / `relation already exists` | 旧 1Panel 库还在。`RESET_DB=1 bash deploy/install.sh`（会清空 Postgres） |
+| `password authentication failed` | `deploy/.env` 里的密码和旧数据卷不一致。用回旧密码，或 `RESET_DB=1` 重建库 |
+| Found orphan containers（web/worker/redis） | 旧栈残留。`RESET_DB=1` 或普通 `install.sh` 都会 `--remove-orphans` |
 | `/health` 不通 | 看 `api` / `migrate` 日志；确认 Postgres 已 healthy |
 | 启动报 `DATABASE_URL is required` | `deploy/.env` 没被 compose 读到，确认 `--env-file deploy/.env` |
 | 登录没验证码 | 没配 SendCloud 三项，去 api 日志搜 `login code` |

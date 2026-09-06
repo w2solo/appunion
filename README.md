@@ -19,13 +19,12 @@ pnpm dev
 
 ## 演示路径
 
-1. 用邮箱验证码登录（新邮箱会自动注册），创建应用（名称、描述、图标），到详情页勾选平台并填写包名，保存一次性 API Key。
+1. 用邮箱验证码登录（新邮箱会自动注册），创建应用（名称、描述、图标），到详情页勾选平台并填写包名。
 2. 用运营账号登录，打开「审核」通过该应用。
-3. 用 curl 调开放接口（把 Key 换成你的明文）：
+3. 用 curl 调开放接口（把 app_id 换成你的应用 ID）：
 
 ```bash
-curl -s 'http://localhost:8787/v1/apps/recommend?platform=android' \
-  -H "Authorization: Bearer auk_live_xxx"
+curl -s 'http://localhost:8787/v1/apps/recommend?app_id=<你的 app_id>&platform=android'
 ```
 
 上报曝光 / 点击时必须带设备上持久化的 `client_id`（UUID）。卡片进入可视区后再报曝光。

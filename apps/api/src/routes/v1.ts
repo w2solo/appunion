@@ -1,8 +1,8 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { and, eq, gte } from "drizzle-orm";
 import { z } from "zod";
 import {
-  apiKeys,
   appPlatforms,
   apps,
   clickEvents,
@@ -22,42 +22,33 @@ import {
 import { getDb } from "../db.js";
 import { readJson, type AppEnv } from "../context.js";
 import { sendError } from "../errors.js";
-import { hashApiKey } from "../lib/api-keys.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
+import { isMockAppId, mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { impressionDedupSet, rateLimit, recentUnion, rememberRecent } from "../kv.js";
 import { bumpStats } from "../lib/stats.js";
 
 type Host = typeof apps.$inferSelect;
+type HostError = {
+  error: true;
+  status: 401 | 403;
+  code: (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
+  message: string;
+};
 
-async function hostFromKey(
-  c: { env: Env; req: { header: (name: string) => string | undefined } },
-): Promise<
-  | Host
-  | {
-      error: true;
-      status: 401 | 403;
-      code: (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
-      message: string;
-    }
+async function hostFromAppId(c: { env: Env; req: { query: (name: string) => string | undefined } }): Promise<
+  Host | HostError
 > {
-  const header = c.req.header("authorization");
-  if (!header?.startsWith("Bearer ")) {
-    return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid API key" };
+  const parsed = z.string().uuid().safeParse(c.req.query("app_id"));
+  if (!parsed.success) {
+    return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid app_id" };
   }
   const db = getDb(c.env.DB);
-  const token = header.slice("Bearer ".length).trim();
-  const hash = hashApiKey(token);
-  const keyRows = await db.select().from(apiKeys).where(eq(apiKeys.keyHash, hash)).limit(1);
-  const key = keyRows[0];
-  if (!key || key.revokedAt) {
-    return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid API key" };
-  }
-  const appRows = await db.select().from(apps).where(eq(apps.id, key.appId)).limit(1);
+  const appRows = await db.select().from(apps).where(eq(apps.id, parsed.data)).limit(1);
   const host = appRows[0];
   if (!host) {
-    return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid API key" };
+    return { error: true, status: 401, code: ERROR_CODES.unauthorized, message: "Invalid app_id" };
   }
-  if (host.reviewStatus !== "approved") {
+  if (host.reviewStatus === "rejected") {
     return {
       error: true,
       status: 403,
@@ -76,7 +67,7 @@ async function hostFromKey(
   return host;
 }
 
-function isHost(v: Awaited<ReturnType<typeof hostFromKey>>): v is Host {
+function isHost(v: Awaited<ReturnType<typeof hostFromAppId>>): v is Host {
   return !("error" in v);
 }
 
@@ -90,8 +81,17 @@ async function listingFor(db: ReturnType<typeof getDb>, appId: string, platform:
 }
 
 export function v1Routes(app: Hono<AppEnv>) {
+  app.use(
+    "/v1/*",
+    cors({
+      origin: "*",
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["Content-Type"],
+    }),
+  );
+
   app.get("/v1/apps/recommend", async (c) => {
-    const host = await hostFromKey(c);
+    const host = await hostFromAppId(c);
     if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
     const db = getDb(c.env.DB);
     const q = z
@@ -111,6 +111,9 @@ export function v1Routes(app: Hono<AppEnv>) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const limit = Math.min(q.data.limit ?? host.listSize, host.listSize, RECOMMEND_MAX);
+    if (host.reviewStatus === "pending") {
+      return c.json({ items: mockRecommend(q.data.platform, limit), mock: true });
+    }
     const items = await recommendItems(db, c.env.KV, host.id, q.data.platform, limit);
     await rememberRecent(
       c.env.KV,
@@ -121,7 +124,7 @@ export function v1Routes(app: Hono<AppEnv>) {
   });
 
   app.get("/v1/apps", async (c) => {
-    const host = await hostFromKey(c);
+    const host = await hostFromAppId(c);
     if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
     const db = getDb(c.env.DB);
     const q = z
@@ -140,6 +143,9 @@ export function v1Routes(app: Hono<AppEnv>) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, page, page_size } = q.data;
+    if (host.reviewStatus === "pending") {
+      return c.json({ ...mockList(platform, page, page_size), mock: true });
+    }
     const data = await listItems(db, host.id, platform, page, page_size);
     await rememberRecent(
       c.env.KV,
@@ -150,7 +156,7 @@ export function v1Routes(app: Hono<AppEnv>) {
   });
 
   app.post("/v1/events/impressions", async (c) => {
-    const host = await hostFromKey(c);
+    const host = await hostFromAppId(c);
     if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
     const db = getDb(c.env.DB);
     const body = z
@@ -178,6 +184,34 @@ export function v1Routes(app: Hono<AppEnv>) {
     const config = await getConfig(db);
     if (!(await rateLimit(c.env.KV, `imp:${host.id}`, config.rateImpressionsPerMin))) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
+    }
+
+    if (host.reviewStatus === "pending") {
+      return c.json({
+        results: body.data.impressions.map((item) => {
+          if (item.app_id === host.id) {
+            return {
+              app_id: item.app_id,
+              idempotency_key: item.idempotency_key,
+              accepted: false,
+              reason: "self",
+            };
+          }
+          if (isMockAppId(item.app_id)) {
+            return {
+              app_id: item.app_id,
+              idempotency_key: item.idempotency_key,
+              accepted: true,
+            };
+          }
+          return {
+            app_id: item.app_id,
+            idempotency_key: item.idempotency_key,
+            accepted: false,
+            reason: "not_visible_in_catalog",
+          };
+        }),
+      });
     }
 
     const results: { app_id: string; idempotency_key: string; accepted: boolean; reason?: string }[] =
@@ -274,7 +308,7 @@ export function v1Routes(app: Hono<AppEnv>) {
   });
 
   app.post("/v1/events/clicks", async (c) => {
-    const host = await hostFromKey(c);
+    const host = await hostFromAppId(c);
     if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
     const db = getDb(c.env.DB);
     const body = z
@@ -296,6 +330,11 @@ export function v1Routes(app: Hono<AppEnv>) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, client_id, app_id, idempotency_key } = body.data;
+    if (host.reviewStatus === "pending") {
+      if (app_id === host.id) return c.json({ accepted: false, reason: "self" });
+      if (isMockAppId(app_id)) return c.json({ accepted: true });
+      return c.json({ accepted: false, reason: "not_visible_in_catalog" });
+    }
     if (app_id === host.id) return c.json({ accepted: false, reason: "self" });
     const targets = await db.select().from(apps).where(eq(apps.id, app_id)).limit(1);
     const target = targets[0];

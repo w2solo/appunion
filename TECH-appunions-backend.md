@@ -42,7 +42,7 @@ V1 后端要同时撑住三件事：
 | 缓存 / 限流 | KV | 验证码、限流、推荐池 ID 列表 |
 | 对象存储 | R2 | App 图标 |
 | 开发者登录 | 邮箱验证码，JWT（access 15min + refresh 30d，httpOnly cookie） | V1 不做 SSO、不做团队成员 |
-| 开放 API 鉴权 | `Authorization: Bearer <api_key>` | key 只存 SHA-256，明文只展示一次 |
+| 开放 API 鉴权 | 查询参数 `app_id`（宿主 UUID） | 客户端直连，不需要 API Key |
 | 后台任务 | 同一 Worker 的 Cron Triggers | 量小，先不引入独立队列 |
 | ORM | Drizzle | schema 即文档，迁移可读 |
 | 校验 | Zod | 请求体、查询参数统一校验 |
@@ -98,7 +98,7 @@ flowchart TB
 
 | 前缀 | 调用方 | 鉴权 | 失败时 |
 | --- | --- | --- | --- |
-| `/v1` | 宿主 App | `api_key` → 解析出宿主 App | 401 / 403 |
+| `/v1` | 宿主 App | 查询参数 `app_id` → 解析出宿主 App | 401 / 403 |
 | `/dashboard` | 开发者 | 登录 JWT，只能碰自己的 App | 401 / 403 |
 | `/admin` | 运营 | 登录 JWT 且 `role = admin` | 401 / 403 |
 
@@ -295,18 +295,19 @@ stateDiagram-v2
 - HTTPS only
 - JSON
 - 时间 ISO-8601 UTC
-- 鉴权头：`Authorization: Bearer <api_key>`
-- 未通过审核、key 无效、key 已撤销：开放 API 一律不可用（含上报）
+- 查询参数 `app_id`：宿主应用 UUID（客户端直连，不要 API Key）
+- 已拒绝、`app_id` 缺失或无效：开放 API 一律不可用（含上报）
+- 审核中（`review_status = pending`）：可用同一 `app_id` 拉结构相同的 mock 列表（响应根上 `mock: true`），曝光/点击对 mock id 返回 accepted 但不写入统计；通过后自动切真实推荐池
 
-宿主 App 从 key 解析出来，客户端不要再传 `host_app_id`。传了也忽略，防止冒充。
+查询参数 `app_id` 是宿主；曝光/点击请求体里的 `app_id` 是列表里的目标应用。
 
 ### 6.1 错误码
 
 | HTTP | code | 何时 |
 | --- | --- | --- |
 | 400 | `invalid_params` | 校验失败 |
-| 401 | `unauthorized` | 缺 key / key 不存在 / 已撤销 |
-| 403 | `app_not_approved` | 宿主未通过审核 |
+| 401 | `unauthorized` | 缺 `app_id` / 不是合法 UUID / 应用不存在 |
+| 403 | `app_not_approved` | 宿主已被拒绝 |
 | 403 | `app_paused_by_ops` | 运营暂停宿主（仍不允许调用，避免作弊号继续报量） |
 | 404 | `target_not_found` | 上报目标不存在 |
 | 429 | `rate_limited` | 超限 |
@@ -322,7 +323,7 @@ stateDiagram-v2
 
 ### 6.2 `GET /v1/apps/recommend`
 
-Query：`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 10，最小 1，最大 10。
+Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 10，最小 1，最大 10。
 
 逻辑：
 
@@ -335,17 +336,19 @@ Query：`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 
 
 同一响应内 ID 不重复。不保证跨请求不重复。
 
+审核中（`pending`）跳过推荐池：返回固定 mock 目录，响应根上带 `mock: true`，不写 `recent:{host}`。
+
 V1 池子最多几百个 ID，洗牌在内存做。不要 `ORDER BY random()` 全表扫。
 
 ### 6.3 `GET /v1/apps`
 
-Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
+Query：`app_id` 必填（宿主 UUID）；`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 
 过滤：该端已填包名、可见（已通过且两种 pause 都为 false）、排除自己。
 
 排序：`created_at DESC, id DESC`（稳定分页）。V1 无分类筛选。
 
-响应：`{ items, page, page_size, total }`。
+响应：`{ items, page, page_size, total }`。审核中同样返回 mock，并带 `mock: true`。
 
 ### 6.4 展示字段（recommend 与 list 共用）
 
@@ -365,6 +368,8 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 不要返回开发者邮箱、审核状态、是否在池中、统计数字。
 
 ### 6.5 `POST /v1/events/impressions`
+
+Query：`app_id` 必填（宿主 UUID）。
 
 ```json
 {
@@ -389,7 +394,7 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 }
 ```
 
-单条 `accepted: false` 仍返回 HTTP 200。鉴权失败才 401。
+单条 `accepted: false` 仍返回 HTTP 200。鉴权失败才 401。审核中对 mock id 返回 `accepted: true`，不写事件表、不计入统计。
 
 拒绝 reason（产品可不对外文档化全部，但服务端要稳定）：
 
@@ -405,6 +410,8 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 
 ### 6.6 `POST /v1/events/clicks`
 
+Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目标应用。
+
 ```json
 {
   "platform": "android",
@@ -414,7 +421,7 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 }
 ```
 
-一次一条。响应 `{ "accepted": true }` 或 `{ "accepted": false, "reason": "no_recent_impression" }`。
+一次一条。响应 `{ "accepted": true }` 或 `{ "accepted": false, "reason": "no_recent_impression" }`。审核中对 mock id 同样 accepted 且不记账。
 
 ---
 
@@ -552,7 +559,7 @@ Query：`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 
 CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解。
 
-创建后 `review_status = pending`。key 可以先生成，但开放 API 在通过前返回 `app_not_approved`。开发者可以先写代码，审核通过当天就能通。
+创建后 `review_status = pending`。客户端用 `app_id` 即可调 `/v1`。审核中开放 API 返回 mock 测试数据（不计曝光）；运营通过当天起返回真实推荐。已拒绝仍返回 `app_not_approved`。
 
 ---
 
@@ -602,7 +609,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 - `api_key` 只存哈希；日志、错误信息、看板都只打 `key_prefix`。
 - 开放 API 不返回其他开发者的邮箱、暂停原因、统计。
 - 图标：服务端转存，不信客户端传来的外链当主图（创建时也可以先填 URL，但 V1 只允许上传，避免 SSRF 去拉图）。
-- CORS：生产同域，浏览器调 `/dashboard` 不依赖跨域。`/v1` 给原生 App，不必对浏览器开放。开发环境由 Vite 代理到 `wrangler dev`。
+- CORS：`/v1` 对浏览器开放 `Access-Control-Allow-Origin: *`（客户端直连，无密钥）。`/dashboard` 生产同域，不依赖跨域。开发环境由 Vite 代理到 `wrangler dev`。
 - 限流对开放 API 必须有；登录接口按 IP + email 限流，防爆破。
 - 管理接口不暴露到文档站点。
 - 不在客户端 bundle 任何服务端密钥。
@@ -653,7 +660,7 @@ packages/db       Drizzle schema + D1 迁移
 packages/shared   Zod 类型、分类枚举、错误码
 ```
 
-不要把开放 API 密钥明文写入 localStorage；不要在 Web 里用开发者的 key 去调 `/v1`。
+不要把服务端密钥写入前端；开放 API 只用 `app_id`，接入页可用同源 `/v1` 做预览，不计后台代发曝光。
 
 ---
 

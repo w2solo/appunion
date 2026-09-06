@@ -34,6 +34,7 @@ import { readJson, routeParam, type AppEnv } from "../context.js";
 import { HttpError, sendError } from "../errors.js";
 import { generateApiKey } from "../lib/api-keys.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
+import { mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { mustUser, requireUser } from "../lib/session.js";
 import { invalidatePoolCache } from "../kv.js";
 import { uploadIcon } from "../r2.js";
@@ -456,6 +457,9 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     if (!(await hostHasPlatform(db, id, q.data.platform))) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
     }
+    if (row.reviewStatus === "pending") {
+      return c.json({ items: mockRecommend(q.data.platform, row.listSize), mock: true });
+    }
     const items = await recommendItems(db, c.env.KV, id, q.data.platform, row.listSize);
     return c.json({ items });
   });
@@ -476,6 +480,9 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     if (!q.success) return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform，分页参数无效");
     if (!(await hostHasPlatform(db, id, q.data.platform))) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    if (row.reviewStatus === "pending") {
+      return c.json({ ...mockList(q.data.platform, q.data.page, q.data.page_size), mock: true });
     }
     return c.json(await listItems(db, id, q.data.platform, q.data.page, q.data.page_size));
   });

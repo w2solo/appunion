@@ -7,7 +7,7 @@
 | 本文范围 | 整站：Web 后台、接入文档站、运营台，以及它们如何和 Node 后端拼在一起 |
 | 状态 | 待评审 |
 
-V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」。开发者在网站上注册、建 App、等审核、复制密钥、读文档；宿主 App 再调 `/v1`。运营在同一套网站里审核。
+V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」。开发者在网站上注册、建 App、等审核、复制 `app_id`、读文档；宿主 App 直连 `/v1`。运营在同一套网站里审核。
 
 ---
 
@@ -18,7 +18,7 @@ V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」�
 | 开发者后台 | 独立开发者 | Web，要登录 |
 | 接入文档 / 样式参考 | 开发者（可未登录阅读） | Web，公开页 |
 | 运营台 | 内部审核 | Web，同一站点，`role = admin` 或超管才看见 |
-| 开放 API | 宿主 App | HTTP JSON，`api_key`，无网页 |
+| 开放 API | 宿主 App | HTTP JSON，查询参数 `app_id`，无网页 |
 
 不做：带 UI 的客户端 SDK、C 端用户站、独立运营后台域名（V1 同一套前端即可）。
 
@@ -42,7 +42,7 @@ flowchart LR
   R2[(R2)]
 
   Web -->|cookie 登录| Api
-  Native -->|Bearer api_key| Api
+  Native -->|query app_id| Api
   Api --> D1
   Api --> KV
   Api --> R2
@@ -148,8 +148,7 @@ flowchart TD
   Home[打开首页] --> Reg[注册邮箱密码]
   Reg --> Apps[进入我的应用]
   Apps --> Create[填写并创建 App]
-  Create --> KeyModal[一次性展示 api_key]
-  KeyModal --> Detail[应用详情：待审]
+  Create --> Detail[应用详情：待审 / 接入]
   Detail --> Docs[去文档对接]
   Detail --> Wait[等审核]
   Wait -->|通过| Ready[开放 API 可用，观察期]
@@ -158,7 +157,7 @@ flowchart TD
   Ready --> Stats[看曝光点击和是否在池中]
 ```
 
-创建成功后 **必须** 用模态框展示完整 `api_key`，提供复制按钮，关闭后永远只显示 `key_prefix + ****`。文案写死：「请立即保存，离开后无法再看明文。」重置密钥走同一套模态框。
+创建成功后进入应用详情「接入」页，复制 `app_id`。开放接口只用查询参数 `app_id`，客户端直连，不需要 API Key。
 
 ### 6.2 运营审核
 
@@ -230,7 +229,7 @@ flowchart TD
 | 描述 | 是 | 实时数字数，上限 30 |
 | 分类 | 是 | 大分类 + 小分类。点输入框提示已有项，也可输入新分类 |
 
-提交：`POST /dashboard/apps` → 成功进密钥模态框 → 确认后去 `/apps/:id`，在详情页勾选平台并填写包名。
+提交：`POST /dashboard/apps` → 成功去 `/apps/:id?tab=integrate`，在详情页勾选平台并填写包名。
 
 失败：校验错误贴在字段下；500 用页顶提示。
 
@@ -244,7 +243,7 @@ flowchart TD
 
 用后端字段拼一句人话，例如：
 
-- 待审：「审核中，通过前开放接口会返回未通过。你可以先按文档写代码。」
+- 待审：「审核中可用 app_id 调 /v1 拉测试数据；通过后自动变为真实推荐。」
 - 拒绝：红条 + `rejected_reason` + 按钮「修改并重新提交」。
 - 通过 + 观察期：「观察期还剩 N 天。请尽快在 App 里真实展示列表并上报曝光，否则到期会暂时离开推荐池。」
 - 通过 + 缺口：「还差 N 次有效曝光才能回到推荐池。全量列表里别人仍可能看到你。」
@@ -261,9 +260,8 @@ flowchart TD
 
 **凭证**
 
-- `app_id` 可复制。
-- `api_key` 只显示前缀。按钮「重置密钥」→ 二次确认（旧 key 立刻失效）→ 明文模态框。
-- 示例：`Authorization: Bearer <你的密钥>`。
+- `app_id` 可复制，写在接入页。客户端请求 `/v1` 时带查询参数 `app_id`。
+- 示例：`GET /v1/apps/recommend?app_id=<uuid>&platform=android`。接入页「点击测试」用同一接口拉列表，弹窗标明 mock 或真实数据。
 
 **开关**
 
@@ -348,7 +346,7 @@ apps/web
 约定：
 
 - 所有 `/dashboard`、`/admin` 请求带 cookie，不把 JWT 放 localStorage。
-- 不把 `api_key` 明文写入 localStorage；只在模态框的 React state 里，关掉即丢。
+- 不把服务端密钥写入前端。开放 API 只用查询参数 `app_id`。
 - 表单提交 disable 按钮，防双击建两个 App。
 - 时间全部按用户本地时区显示，接口仍是 UTC。
 
@@ -366,7 +364,7 @@ apps/web
 | 列表/详情的人话状态 | 后端给原始字段，**文案由前端拼**，方便改字不改 API |
 | 同域部署 | 生产关掉跨域 CORS；开发 Vite 代理 |
 
-开放 API 仍然只有宿主 App 调用，Web 后台 **禁止** 用用户的 `api_key` 去调 `/v1` 做「预览推荐」。避免后台流量污染曝光。若以后要做预览，另开 `/dashboard/apps/:id/preview-recommend`，不计统计。
+开放 API 由宿主 App 用 `app_id` 直连。接入页「点击测试」同源调 `/v1` 做预览，不代发曝光/点击。
 
 ---
 
@@ -418,7 +416,7 @@ packages/shared   Zod、分类枚举、错误码、文档可引用的 API 类型
 按这个切，每一段都可以演示：
 
 1. **骨架**：monorepo、Postgres 迁移、注册登录、`/me`、空白 `/apps` 页。
-2. **建 App**：创建表单、图标上传、一次性密钥、详情页待审状态。
+2. **建 App**：创建表单、图标上传、详情接入页复制 `app_id`。
 3. **运营审核**：`/ops/review` 通过/拒绝，开发者侧状态条跟着变。
 4. **开放 API**：recommend / list，文档页写出来，用 curl 就能调。
 5. **上报与看板**：impressions/clicks → `/apps/:id/stats` 出数。
@@ -434,8 +432,8 @@ packages/shared   Zod、分类枚举、错误码、文档可引用的 API 类型
 
 1. 注册 → 自动进后台 → 退出 → 再登录。
 2. 未登录打 `/apps` 会跳登录，登录后回到原地址。
-3. 创建 App → 密钥只出现一次 → 刷新详情只剩前缀。
-4. 重置密钥后旧密钥调 `/v1` 为 401。
+3. 创建 App → 进入接入页，可复制 `app_id`。
+4. 缺 `app_id` 或无效 UUID 调 `/v1` 为 401。
 5. 待审 / 拒绝 / 通过 / 暂停 四种状态条文案正确。
 6. 开发者看不到 `/ops`；运营能审，拒绝必填原因。
 7. 文档未登录可读。

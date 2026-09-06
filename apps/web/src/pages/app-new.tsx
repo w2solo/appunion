@@ -2,15 +2,12 @@ import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { graphemeLength } from "@appunions/shared";
 import { api } from "../shared/api";
-import { KeyModal } from "../shared/key-modal";
 import { CategoryFields } from "../shared/category-fields";
 
 export function NewAppPage() {
   const nav = useNavigate();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [appId, setAppId] = useState("");
   const [tagline, setTagline] = useState("");
   const [category, setCategory] = useState("");
   const [subcategory, setSubcategory] = useState("");
@@ -22,12 +19,11 @@ export function NewAppPage() {
     const form = e.currentTarget;
     const data = new FormData(form);
     try {
-      const res = await api<{ app: { id: string }; apiKey: string }>("/dashboard/apps", {
+      const res = await api<{ app: { id: string } }>("/dashboard/apps", {
         method: "POST",
         body: data,
       });
-      setApiKey(res.apiKey);
-      setAppId(res.app.id);
+      nav(`/apps/${res.app.id}?tab=integrate`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "创建失败");
     } finally {
@@ -69,14 +65,6 @@ export function NewAppPage() {
           {busy ? "提交中…" : "创建"}
         </button>
       </form>
-      {apiKey && (
-        <KeyModal
-          apiKey={apiKey}
-          onClose={() => {
-            nav(`/apps/${appId}`);
-          }}
-        />
-      )}
     </div>
   );
 }

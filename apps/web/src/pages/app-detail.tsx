@@ -10,8 +10,7 @@ import {
   type Platform,
 } from "@appunions/shared";
 import { api } from "../shared/api";
-import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
-import { KeyModal } from "../shared/key-modal";
+import { ActionStatus, useActionFeedback } from "../shared/action-status";
 import { platformLabel, statusLabel } from "../shared/status";
 import { CategoryFields } from "../shared/category-fields";
 import { AppStatsPanel } from "./app-stats";
@@ -44,7 +43,6 @@ const TABS = [
   { id: "info", label: "基本信息" },
   { id: "config", label: "配置" },
   { id: "stats", label: "数据" },
-  { id: "keys", label: "密钥" },
   { id: "integrate", label: "接入" },
 ] as const;
 
@@ -60,7 +58,6 @@ export function AppDetailPage() {
   const tab = parseTab(params.get("tab"));
   const [app, setApp] = useState<AppDetail | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [apiKey, setApiKey] = useState<string | null>(null);
 
   async function load() {
     const data = await api<AppDetail>(`/dashboard/apps/${id}`);
@@ -103,11 +100,9 @@ export function AppDetailPage() {
       {tab === "info" && <InfoTab app={app} setApp={setApp} onSaved={load} />}
       {tab === "config" && <ConfigTab app={app} onSaved={load} />}
       {tab === "stats" && <AppStatsPanel id={id} />}
-      {tab === "keys" && <KeysTab app={app} apiKey={apiKey} setApiKey={setApiKey} onRotated={load} />}
       {tab === "integrate" && (
         <AppIntegratePanel appId={app.id} appName={app.name} platforms={app.platforms} listSize={app.listSize} />
       )}
-      {apiKey && <KeyModal apiKey={apiKey} onClose={() => setApiKey(null)} />}
     </div>
   );
 }
@@ -265,64 +260,6 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   );
 }
 
-function KeysTab({
-  app,
-  apiKey,
-  setApiKey,
-  onRotated,
-}: {
-  app: AppDetail;
-  apiKey: string | null;
-  setApiKey: (key: string | null) => void;
-  onRotated: () => Promise<void>;
-}) {
-  const { id } = useParams();
-  const creds = useActionFeedback();
-  const copyId = useActionFeedback();
-
-  return (
-    <section className="rounded-lg bg-white p-6 shadow-sm">
-      <h2 className="font-medium">密钥</h2>
-      <p className="mt-2 text-sm text-muted">
-        客户端用 Bearer 令牌调开放接口。明文只在创建或重置时展示一次，离开后无法再看。
-      </p>
-      <p className="mt-4 text-sm">
-        app_id：<code className="rounded bg-slate-100 px-1">{app.id}</code>
-        <button
-          className="ml-2 text-brand"
-          type="button"
-          onClick={() => void copyId.run(() => copyToClipboard(app.id), "已复制")}
-        >
-          {copyId.message ? "已复制" : "复制"}
-        </button>
-        {copyId.error && <span className="ml-2 text-sm text-red-600">{copyId.error}</span>}
-      </p>
-      <p className="mt-2 text-sm">
-        api_key：<code className="rounded bg-slate-100 px-1">{app.keyPrefix}****</code>
-      </p>
-      <p className="mt-2 text-xs text-muted">Authorization: Bearer &lt;你的密钥&gt;</p>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        <button
-          className="rounded border border-line px-3 py-1.5 text-sm disabled:opacity-50"
-          disabled={creds.busy}
-          type="button"
-          onClick={() => {
-            if (!confirm("重置后旧密钥立刻失效，确定吗？")) return;
-            void creds.run(async () => {
-              const d = await api<{ apiKey: string }>(`/dashboard/apps/${id}/api-key/rotate`, { method: "POST" });
-              setApiKey(d.apiKey);
-              await onRotated();
-            }, "密钥已重置");
-          }}
-        >
-          {creds.busy ? "重置中…" : "重置密钥"}
-        </button>
-        <ActionStatus error={creds.error} message={apiKey ? "" : creds.message} />
-      </div>
-    </section>
-  );
-}
-
 function PlatformsSection({
   app,
   onSaved,
@@ -423,7 +360,7 @@ function PlatformsSection({
 function StatusBar({ app }: { app: AppDetail }) {
   let text = "";
   if (app.reviewStatus === "pending") {
-    text = "审核中，通过前开放接口会返回未通过。你可以先到「接入」用后台预览写 UI。";
+    text = "审核中可用 app_id 调 /v1 拉测试数据；通过后自动变为真实推荐。";
   } else if (app.reviewStatus === "rejected") {
     text = `已拒绝：${app.rejectedReason ?? ""}`;
   } else if (app.pausedByOps) {

@@ -3,6 +3,7 @@ import { ERROR_CODES } from "@appunions/shared";
 import type { AppEnv } from "./context.js";
 import { HttpError } from "./errors.js";
 import { iconContentType } from "./r2.js";
+import { mockIconSvg } from "./lib/mock-catalog.js";
 import { dashboardAuthRoutes } from "./routes/dashboard-auth.js";
 import { dashboardAppRoutes } from "./routes/dashboard-apps.js";
 import { adminRoutes } from "./routes/admin.js";
@@ -25,6 +26,21 @@ app.get("/health", async (c) => {
   } catch {
     return c.json({ ok: false }, 503);
   }
+});
+
+app.get("/media/mock-icons/:file", (c) => {
+  const file = c.req.param("file");
+  if (!file.endsWith(".svg") || file.includes("..") || file.includes("/")) {
+    return c.body(null, 400);
+  }
+  const svg = mockIconSvg(file.slice(0, -".svg".length));
+  if (!svg) return c.body(null, 404);
+  return new Response(svg, {
+    headers: {
+      "Content-Type": "image/svg+xml; charset=utf-8",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
 });
 
 app.get("/media/icons/:file", async (c) => {

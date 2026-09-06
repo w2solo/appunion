@@ -4,6 +4,7 @@ import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
 import { isSuperAdminEmail, isValidCategoryName, isValidPackageName, normalizeCategoryName } from "@appunions/shared";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
+import { isMockAppId, MOCK_APPS, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
 
 describe("recommend pool eligibility", () => {
   const config = { graceDays: 7, reciprocityImpressions: 100 };
@@ -89,5 +90,48 @@ describe("categories", () => {
     assert.equal(isValidCategoryName("文件管理"), true);
     assert.equal(isValidCategoryName(""), false);
     assert.equal(isValidCategoryName("   "), false);
+  });
+});
+
+describe("mock catalog", () => {
+  it("has a stable pool of 16 apps with unique ids", () => {
+    assert.equal(MOCK_APPS.length, 16);
+    assert.equal(new Set(MOCK_APPS.map((app) => app.id)).size, 16);
+    for (const app of MOCK_APPS) {
+      assert.equal(isMockAppId(app.id), true);
+    }
+    assert.equal(isMockAppId("00000000-0000-4000-8000-000000000099"), false);
+  });
+
+  it("recommend respects limit and does not duplicate", () => {
+    const items = mockRecommend("android", 10);
+    assert.equal(items.length, 10);
+    assert.equal(new Set(items.map((item) => item.id)).size, 10);
+    assert.ok(items.every((item) => item.platform === "android"));
+    assert.ok(items.every((item) => item.package_name.startsWith("com.appunions.mock.")));
+  });
+
+  it("recommend does not exceed pool size", () => {
+    const items = mockRecommend("ios", 50);
+    assert.equal(items.length, MOCK_APPS.length);
+  });
+
+  it("list paginates with a stable total", () => {
+    const page1 = mockList("harmonyos", 1, 10);
+    const page2 = mockList("harmonyos", 2, 10);
+    assert.equal(page1.total, 16);
+    assert.equal(page1.page_size, 10);
+    assert.equal(page1.items.length, 10);
+    assert.equal(page2.items.length, 6);
+    assert.equal(page1.items[0]?.id, MOCK_APPS[0]?.id);
+    assert.equal(page2.items[0]?.id, MOCK_APPS[10]?.id);
+    assert.ok(page1.items.every((item) => item.platform === "harmonyos"));
+  });
+
+  it("serves svg icons only for mock ids", () => {
+    const svg = mockIconSvg(MOCK_APPS[0]!.id);
+    assert.ok(svg?.includes("<svg"));
+    assert.ok(svg?.includes("速"));
+    assert.equal(mockIconSvg("not-a-mock-id"), null);
   });
 });

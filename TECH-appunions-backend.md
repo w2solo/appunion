@@ -524,7 +524,7 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 | POST | `/dashboard/auth/register` | 邮箱、密码；V1 先不强制邮箱验证（决策 D2） |
 | POST | `/dashboard/auth/login` | |
 | POST | `/dashboard/auth/logout` | |
-| GET | `/dashboard/auth/me` | 当前用户 `{ id, email, role, superAdmin }`，Web 刷新页面用 |
+| GET | `/dashboard/auth/me` | 当前用户 `{ id, email, role, superAdmin, superAdminEmail? }`，Web 刷新页面用。`superAdminEmail` 为环境变量里配置的超管邮箱 |
 | GET | `/dashboard/categories` | 两级分类目录，供创建应用时提示 |
 | GET | `/dashboard/apps` | 我的 App 列表。每条带摘要：`icon_url, platforms, review_status, paused_*, in_recommend_pool, grace_days_left, impressions_received_7d` |
 | POST | `/dashboard/apps` | 创建，`multipart`（名称、描述、分类、图标）。生成 api_key，**响应里明文只出现这一次** |

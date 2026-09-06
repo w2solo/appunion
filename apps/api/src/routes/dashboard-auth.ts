@@ -84,7 +84,10 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
       user = updated!;
     }
     await setAuthCookies(c, user.id, publicUser(user, c.env.SUPER_ADMIN_EMAIL).role);
-    return c.json(publicUser(user, c.env.SUPER_ADMIN_EMAIL));
+    return c.json({
+      ...publicUser(user, c.env.SUPER_ADMIN_EMAIL),
+      superAdminEmail: c.env.SUPER_ADMIN_EMAIL || undefined,
+    });
   });
 
   app.post("/dashboard/auth/logout", async (c) => {
@@ -104,6 +107,9 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
       await db.update(developers).set({ role: "admin" }).where(eq(developers.id, user.id));
       user.role = "admin";
     }
-    return c.json(publicUser(user, c.env.SUPER_ADMIN_EMAIL));
+    return c.json({
+      ...publicUser(user, c.env.SUPER_ADMIN_EMAIL),
+      superAdminEmail: c.env.SUPER_ADMIN_EMAIL || undefined,
+    });
   });
 }

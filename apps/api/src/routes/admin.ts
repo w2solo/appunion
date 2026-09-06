@@ -35,6 +35,10 @@ const configPatch = z.object({
   rateClicksPerMin: z.number().int().min(1).max(10_000).optional(),
 });
 
+function withOpsMeta<T extends object>(c: { env: { SUPER_ADMIN_EMAIL: string } }, row: T) {
+  return { ...row, superAdminEmail: c.env.SUPER_ADMIN_EMAIL };
+}
+
 export function adminRoutes(app: Hono<AppEnv>) {
   app.use("/admin/*", requireAdmin);
 
@@ -215,7 +219,7 @@ export function adminRoutes(app: Hono<AppEnv>) {
     });
   });
 
-  app.get("/admin/config", async (c) => c.json(await getConfig(getDb(c.env.DB))));
+  app.get("/admin/config", async (c) => c.json(withOpsMeta(c, await getConfig(getDb(c.env.DB)))));
 
   app.patch("/admin/config", async (c) => {
     const db = getDb(c.env.DB);
@@ -241,7 +245,7 @@ export function adminRoutes(app: Hono<AppEnv>) {
       .returning();
     await refreshRecommendPool(db);
     await invalidatePoolCache(c.env.KV);
-    return c.json(updated);
+    return c.json(withOpsMeta(c, updated!));
   });
 
   app.get("/admin/categories", async (c) => {

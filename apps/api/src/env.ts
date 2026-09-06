@@ -31,8 +31,17 @@ export function readProcessEnv() {
     SENDCLOUD_API_KEY: process.env.SENDCLOUD_API_KEY ?? "",
     SENDCLOUD_FROM: process.env.SENDCLOUD_FROM ?? "",
     CRON_SECRET: process.env.CRON_SECRET ?? "",
-    SUPER_ADMIN_EMAIL: (process.env.SUPER_ADMIN_EMAIL ?? "").trim().toLowerCase(),
+    SUPER_ADMIN_EMAIL: parseSuperAdminEmail(process.env.SUPER_ADMIN_EMAIL),
   };
+}
+
+function parseSuperAdminEmail(raw: string | undefined) {
+  const email = (raw ?? "").trim().toLowerCase();
+  if (!email) return "";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("SUPER_ADMIN_EMAIL must be a valid email");
+  }
+  return email;
 }
 
 export function buildEnv(

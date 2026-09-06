@@ -35,6 +35,9 @@ if (!databaseUrl) {
 const { db } = createDb(databaseUrl);
 const env = buildEnv(db, createMemoryCache(), await createDiskIcons(iconsDir()), readProcessEnv());
 await seed(env.DB, env.SUPER_ADMIN_EMAIL);
+if (!env.SUPER_ADMIN_EMAIL) {
+  console.warn("SUPER_ADMIN_EMAIL is not set; no super-admin account will be seeded");
+}
 
 if (process.env.NODE_ENV === "production") {
   attachSpa(app, webDistDir());

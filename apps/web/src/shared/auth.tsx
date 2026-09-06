@@ -6,6 +6,7 @@ export type User = {
   email: string;
   role: "developer" | "admin";
   superAdmin: boolean;
+  superAdminEmail?: string;
 };
 
 const Ctx = createContext<{
@@ -22,7 +23,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function refresh() {
     try {
       const me = await api<User>("/dashboard/auth/me");
-      setUser({ ...me, superAdmin: Boolean(me.superAdmin) });
+      setUser({
+        ...me,
+        superAdmin: Boolean(me.superAdmin),
+        superAdminEmail: me.superAdminEmail || undefined,
+      });
     } catch {
       setUser(null);
     } finally {

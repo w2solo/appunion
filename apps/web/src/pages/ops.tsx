@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { ActionStatus, useActionFeedback } from "../shared/action-status";
 import { api } from "../shared/api";
+import { useAuth } from "../shared/auth";
 import { platformLabel, statusLabel } from "../shared/status";
 import { SuggestInput } from "../shared/category-fields";
 
@@ -260,7 +261,7 @@ export function OpsConfigPage() {
 
   if (!cfg) return <p className="text-muted">加载中…</p>;
 
-  const fields: [keyof OpsConfig, string][] = [
+  const fields: [NumericConfigKey, string][] = [
     ["graceDays", "观察天数"],
     ["reciprocityImpressions", "互惠曝光门槛"],
     ["impressionDedupMinutes", "曝光去重分钟"],
@@ -274,6 +275,13 @@ export function OpsConfigPage() {
   return (
     <div className="max-w-lg space-y-6">
       <h1 className="text-2xl font-semibold">设置</h1>
+      <section className="space-y-2 rounded-lg bg-white p-6 shadow-sm">
+        <h2 className="font-medium">超级管理员</h2>
+        <p className="text-sm text-muted">由环境变量 SUPER_ADMIN_EMAIL 指定，不能在页面里改。</p>
+        <p className="rounded border border-line bg-slate-50 px-3 py-2 text-sm">
+          {cfg.superAdminEmail || "未配置"}
+        </p>
+      </section>
       <form className="space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onSubmit(e)}>
         <h2 className="font-medium">门槛参数</h2>
         {fields.map(([k, label]) => (
@@ -301,6 +309,7 @@ type AdminUser = {
 };
 
 export function OpsAdminsPage() {
+  const { user } = useAuth();
   const [q, setQ] = useState("");
   const [items, setItems] = useState<AdminUser[]>([]);
   const [error, setError] = useState("");
@@ -342,8 +351,8 @@ export function OpsAdminsPage() {
     <div className="max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold">管理员</h1>
       <p className="text-sm text-muted">
-        超级管理员由环境变量 <code className="rounded bg-slate-100 px-1">SUPER_ADMIN_EMAIL</code>{" "}
-        指定。只能把已经注册过的用户标成普通管理员；对方刷新页面或重新登录后即可看到审核台。普通管理员可以审核应用、改门槛参数，但不能再管理管理员。
+        当前超级管理员是 <code className="rounded bg-slate-100 px-1">{user?.superAdminEmail || "未配置"}</code>
+        ，由环境变量 SUPER_ADMIN_EMAIL 指定。只能把已经注册过的用户标成普通管理员；对方刷新页面或重新登录后即可看到审核台。普通管理员可以审核应用、改门槛参数，但不能再管理管理员。
       </p>
       <form
         className="flex gap-2"
@@ -422,7 +431,10 @@ type OpsConfig = {
   rateListPerMin: number;
   rateImpressionsPerMin: number;
   rateClicksPerMin: number;
+  superAdminEmail: string;
 };
+
+type NumericConfigKey = Exclude<keyof OpsConfig, "superAdminEmail">;
 
 type CategoryNode = { id: string; name: string; appCount: number; children: { id: string; name: string; appCount: number }[] };
 

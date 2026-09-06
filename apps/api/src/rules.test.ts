@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
-import { isSuperAdminEmail, isValidCategoryName, isValidPackageName, normalizeCategoryName } from "@appunions/shared";
+import {
+  buildDownloads,
+  isSuperAdminEmail,
+  isValidCategoryName,
+  isValidHttpsUrl,
+  isValidPackageName,
+  normalizeCategoryName,
+  parseDownloadStores,
+  parseExtraDownloads,
+} from "@appunions/shared";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 import { isMockAppId, MOCK_APPS, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
@@ -111,6 +120,10 @@ describe("mock catalog", () => {
     assert.equal(new Set(items.map((item) => item.id)).size, 10);
     assert.ok(items.every((item) => item.platform === "android"));
     assert.ok(items.every((item) => item.package_name.startsWith("com.appunions.mock.")));
+    assert.ok(items.every((item) => item.description.length > 0));
+    assert.ok(items.every((item) => item.supported_platforms.includes("android")));
+    assert.ok(items.every((item) => item.downloads.length > 0));
+    assert.ok(items.every((item) => item.downloads.every((d) => d.label.length > 0)));
   });
 
   it("recommend does not exceed pool size", () => {
@@ -128,6 +141,7 @@ describe("mock catalog", () => {
     assert.equal(page1.items[0]?.id, MOCK_APPS[0]?.id);
     assert.equal(page2.items[0]?.id, MOCK_APPS[10]?.id);
     assert.ok(page1.items.every((item) => item.platform === "harmonyos"));
+    assert.ok(page1.items.every((item) => item.downloads.some((d) => d.kind === "store" && d.label === "鸿蒙应用市场")));
   });
 
   it("serves svg icons only for mock ids", () => {
@@ -135,5 +149,50 @@ describe("mock catalog", () => {
     assert.ok(svg?.includes("<svg"));
     assert.ok(svg?.includes("速"));
     assert.equal(mockIconSvg("not-a-mock-id"), null);
+  });
+});
+
+describe("android downloads", () => {
+  it("builds store urls and extra links, falling back to market", () => {
+    const withStores = buildDownloads({
+      platform: "android",
+      packageName: "com.company.app",
+      downloadStores: ["huawei", "play"],
+      extraDownloads: [{ label: "官网", url: "https://example.com/app" }],
+    });
+    assert.deepEqual(
+      withStores.map((item) => item.label),
+      ["华为应用市场", "Google Play", "官网"],
+    );
+    assert.equal(withStores[0]?.url, "appmarket://details?id=com.company.app");
+    assert.equal(withStores[2]?.kind, "url");
+
+    const fallback = buildDownloads({
+      platform: "android",
+      packageName: "com.company.app",
+      downloadStores: [],
+      extraDownloads: [],
+    });
+    assert.equal(fallback.length, 1);
+    assert.equal(fallback[0]?.label, "打开应用商店");
+    assert.equal(fallback[0]?.url, "market://details?id=com.company.app");
+  });
+
+  it("ios and harmonyos keep a store button with empty url", () => {
+    const ios = buildDownloads({ platform: "ios", packageName: "com.company.app" });
+    assert.equal(ios[0]?.label, "App Store");
+    assert.equal(ios[0]?.url, "");
+    const harmony = buildDownloads({ platform: "harmonyos", packageName: "com.company.app" });
+    assert.equal(harmony[0]?.label, "鸿蒙应用市场");
+    assert.equal(harmony[0]?.url, "");
+  });
+
+  it("validates https extras and store keys", () => {
+    assert.equal(isValidHttpsUrl("https://example.com/a"), true);
+    assert.equal(isValidHttpsUrl("http://example.com/a"), false);
+    assert.equal(parseDownloadStores(["huawei", "nope"]).ok, false);
+    assert.deepEqual(parseDownloadStores(["xiaomi", "xiaomi"]), { ok: true, value: ["xiaomi"] });
+    assert.equal(parseExtraDownloads([{ label: "官网", url: "http://x.com" }]).ok, false);
+    assert.equal(parseExtraDownloads([{ label: "官网", url: "https://example.com" }]).ok, true);
   });
 });

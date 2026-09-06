@@ -3,6 +3,7 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgTable,
   primaryKey,
   text,
@@ -40,6 +41,7 @@ export const apps = pgTable(
     name: text("name").notNull(),
     iconUrl: text("icon_url").notNull(),
     tagline: text("tagline").notNull(),
+    description: text("description").notNull().default(""),
     category: text("category").notNull(),
     subcategory: text("subcategory").notNull().default("其他"),
     reviewStatus: text("review_status").notNull().default("pending"),
@@ -70,6 +72,11 @@ export const appPlatforms = pgTable(
       .references(() => apps.id, { onDelete: "cascade" }),
     platform: text("platform").notNull(),
     packageName: text("package_name").notNull(),
+    downloadStores: jsonb("download_stores").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    extraDownloads: jsonb("extra_downloads")
+      .$type<{ label: string; url: string }[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     createdAt: createdAt(),
   },
   (t) => ({

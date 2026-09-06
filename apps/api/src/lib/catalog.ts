@@ -1,22 +1,35 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { appPlatforms, apps, getConfig, type AppDb } from "@appunions/db";
-import { type Platform } from "@appunions/shared";
+import { appPlatforms, apps, getConfig, platformsForApps, type AppDb, type AppPlatformPublic } from "@appunions/db";
+import { buildDownloads, supportedPlatformsOf, type ListingItem, type Platform } from "@appunions/shared";
 import { pickRandom } from "./random.js";
 import type { CacheStore } from "../cache.js";
 import { cacheGet, cacheSet } from "../kv.js";
 
 type AppRow = typeof apps.$inferSelect;
 
-export function listingDto(app: AppRow, platform: Platform, packageName: string) {
+export function listingDto(
+  app: AppRow,
+  platform: Platform,
+  current: AppPlatformPublic,
+  allPlatforms: AppPlatformPublic[],
+): ListingItem {
   return {
     id: app.id,
     name: app.name,
     icon_url: app.iconUrl,
     tagline: app.tagline,
+    description: app.description ?? "",
     category: app.category,
     subcategory: app.subcategory,
     platform,
-    package_name: packageName,
+    package_name: current.packageName,
+    supported_platforms: supportedPlatformsOf(allPlatforms),
+    downloads: buildDownloads({
+      platform,
+      packageName: current.packageName,
+      downloadStores: current.downloadStores,
+      extraDownloads: current.extraDownloads,
+    }),
   };
 }
 
@@ -43,6 +56,24 @@ async function poolIds(db: AppDb, kv: CacheStore, platform: Platform, cacheSec: 
   return ids;
 }
 
+function listingsFromRows(
+  platform: Platform,
+  appRows: AppRow[],
+  listings: Map<string, AppPlatformPublic[]>,
+  order: string[],
+): ListingItem[] {
+  const byId = new Map(appRows.map((app) => [app.id, app]));
+  return order
+    .map((id) => {
+      const app = byId.get(id);
+      const platforms = listings.get(id) ?? [];
+      const current = platforms.find((item) => item.platform === platform);
+      if (!app || !current) return null;
+      return listingDto(app, platform, current, platforms);
+    })
+    .filter((item): item is ListingItem => Boolean(item));
+}
+
 export async function recommendItems(
   db: AppDb,
   kv: CacheStore,
@@ -53,22 +84,10 @@ export async function recommendItems(
   const config = await getConfig(db);
   const ids = (await poolIds(db, kv, platform, config.recommendCacheSeconds)).filter((id) => id !== hostId);
   const picked = pickRandom(ids, limit);
-  const rows =
-    picked.length === 0
-      ? []
-      : await db
-          .select({ app: apps, packageName: appPlatforms.packageName })
-          .from(apps)
-          .innerJoin(
-            appPlatforms,
-            and(eq(appPlatforms.appId, apps.id), eq(appPlatforms.platform, platform)),
-          )
-          .where(inArray(apps.id, picked));
-  const byId = new Map(rows.map((r) => [r.app.id, r]));
-  return picked
-    .map((id) => byId.get(id))
-    .filter((r): r is (typeof rows)[number] => Boolean(r))
-    .map((r) => listingDto(r.app, platform, r.packageName));
+  if (picked.length === 0) return [];
+  const rows = await db.select().from(apps).where(inArray(apps.id, picked));
+  const listings = await platformsForApps(db, picked);
+  return listingsFromRows(platform, rows, listings, picked);
 }
 
 export async function listItems(
@@ -92,15 +111,25 @@ export async function listItems(
     .where(where);
   const total = Number(countRows[0]?.n ?? 0);
   const rows = await db
-    .select({ app: apps, packageName: appPlatforms.packageName })
+    .select({ app: apps })
     .from(apps)
     .innerJoin(appPlatforms, eq(appPlatforms.appId, apps.id))
     .where(where)
     .orderBy(desc(apps.createdAt), desc(apps.id))
     .limit(pageSize)
     .offset((page - 1) * pageSize);
+  const appRows = rows.map((row) => row.app);
+  const listings = await platformsForApps(
+    db,
+    appRows.map((app) => app.id),
+  );
   return {
-    items: rows.map((r) => listingDto(r.app, platform, r.packageName)),
+    items: listingsFromRows(
+      platform,
+      appRows,
+      listings,
+      appRows.map((app) => app.id),
+    ),
     page,
     page_size: pageSize,
     total,

@@ -4,19 +4,26 @@ import { ActionStatus, useActionFeedback } from "../shared/action-status";
 import { api } from "../shared/api";
 import { useAuth } from "../shared/auth";
 import { platformLabel, statusLabel } from "../shared/status";
+import { ANDROID_STORE_LABELS, isAndroidStore } from "@appunions/shared";
 import { SuggestInput } from "../shared/category-fields";
 
 type AdminApp = {
   id: string;
   name: string;
   iconUrl: string;
-  platforms: { platform: string; packageName: string }[];
+  platforms: {
+    platform: string;
+    packageName: string;
+    downloadStores?: string[];
+    extraDownloads?: { label: string; url: string }[];
+  }[];
   reviewStatus: string;
   pausedByDeveloper: boolean;
   pausedByOps: boolean;
   inRecommendPool: boolean;
   developerEmail: string;
   tagline: string;
+  description?: string;
   category: string;
   subcategory: string;
   rejectedReason: string | null;
@@ -137,13 +144,41 @@ export function OpsAppPage() {
         </div>
       </div>
       <p>{app.tagline}</p>
+      {app.description ? <p className="whitespace-pre-wrap text-sm text-slate-700">{app.description}</p> : null}
       {app.platforms.length === 0 ? (
         <p className="text-sm text-amber-800">尚未配置平台和包名。</p>
       ) : (
-        <ul className="space-y-1 text-sm">
+        <ul className="space-y-3 text-sm">
           {app.platforms.map((p) => (
             <li key={p.platform}>
-              {platformLabel(p.platform)}：<code className="rounded bg-slate-100 px-1">{p.packageName}</code>
+              <div>
+                {platformLabel(p.platform)}：<code className="rounded bg-slate-100 px-1">{p.packageName}</code>
+              </div>
+              {p.platform === "android" && (
+                <div className="mt-1 space-y-1 text-muted">
+                  <p>
+                    下载平台：
+                    {(p.downloadStores ?? []).filter(isAndroidStore).length === 0
+                      ? "未选（走系统应用商店）"
+                      : (p.downloadStores ?? [])
+                          .filter(isAndroidStore)
+                          .map((store) => ANDROID_STORE_LABELS[store])
+                          .join("、")}
+                  </p>
+                  {(p.extraDownloads ?? []).length > 0 && (
+                    <ul className="list-disc pl-5">
+                      {p.extraDownloads?.map((item) => (
+                        <li key={`${item.label}-${item.url}`}>
+                          {item.label}：
+                          <a className="text-brand" href={item.url} rel="noreferrer" target="_blank">
+                            {item.url}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

@@ -1,12 +1,20 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
+  ANDROID_STORE_LABELS,
+  ANDROID_STORES,
+  DESCRIPTION_MAX_GRAPHEMES,
+  EXTRA_DOWNLOAD_MAX,
+  EXTRA_DOWNLOAD_LABEL_MAX,
   LIST_SIZE_MAX,
   LIST_SIZE_MIN,
   PACKAGE_NAME_HINTS,
   PLATFORMS,
   PLATFORM_LABELS,
+  TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
+  isAndroidStore,
+  type ExtraDownload,
   type Platform,
 } from "@appunions/shared";
 import { api } from "../shared/api";
@@ -16,13 +24,19 @@ import { CategoryFields } from "../shared/category-fields";
 import { AppStatsPanel } from "./app-stats";
 import { AppIntegratePanel } from "./app-integrate";
 
-type AppPlatform = { platform: Platform; packageName: string };
+type AppPlatform = {
+  platform: Platform;
+  packageName: string;
+  downloadStores?: string[];
+  extraDownloads?: ExtraDownload[];
+};
 
 type AppDetail = {
   id: string;
   name: string;
   iconUrl: string;
   tagline: string;
+  description: string;
   category: string;
   subcategory: string;
   platforms: AppPlatform[];
@@ -43,7 +57,7 @@ const TABS = [
   { id: "info", label: "基本信息" },
   { id: "config", label: "配置" },
   { id: "stats", label: "数据" },
-  { id: "integrate", label: "接入" },
+  { id: "integrate", label: "接入文档" },
 ] as const;
 
 type Tab = (typeof TABS)[number]["id"];
@@ -119,13 +133,21 @@ function InfoTab({
   const profile = useActionFeedback();
   const pause = useActionFeedback();
   const { id } = useParams();
+  const [tagline, setTagline] = useState(app.tagline);
+  const [description, setDescription] = useState(app.description ?? "");
+
+  useEffect(() => {
+    setTagline(app.tagline);
+    setDescription(app.description ?? "");
+  }, [app.tagline, app.description]);
 
   async function onSave(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     const body = {
       name: String(fd.get("name")),
-      tagline: String(fd.get("tagline")),
+      tagline,
+      description,
       category: String(fd.get("category")),
       subcategory: String(fd.get("subcategory")),
     };
@@ -149,8 +171,23 @@ function InfoTab({
             <input className="mt-1 w-full rounded border border-line px-3 py-2" name="name" defaultValue={app.name} />
           </label>
           <label className="text-sm">
-            描述（{graphemeLength(app.tagline)}/30）
-            <input className="mt-1 w-full rounded border border-line px-3 py-2" name="tagline" defaultValue={app.tagline} />
+            简介（{graphemeLength(tagline)}/{TAGLINE_MAX_GRAPHEMES}）
+            <input
+              className="mt-1 w-full rounded border border-line px-3 py-2"
+              name="tagline"
+              value={tagline}
+              onChange={(e) => setTagline(e.target.value)}
+            />
+          </label>
+          <label className="text-sm">
+            更多描述（{graphemeLength(description)}/{DESCRIPTION_MAX_GRAPHEMES}）
+            <textarea
+              className="mt-1 min-h-[96px] w-full rounded border border-line px-3 py-2"
+              name="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="详情弹窗里展示，可留空"
+            />
           </label>
           <CategoryFields
             category={app.category}
@@ -260,6 +297,19 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   );
 }
 
+function emptyStores(): Record<(typeof ANDROID_STORES)[number], boolean> {
+  return {
+    play: false,
+    huawei: false,
+    honor: false,
+    xiaomi: false,
+    oppo: false,
+    vivo: false,
+    tencent: false,
+    coolapk: false,
+  };
+}
+
 function PlatformsSection({
   app,
   onSaved,
@@ -278,16 +328,35 @@ function PlatformsSection({
     for (const p of app.platforms) next[p.platform] = p.packageName;
     return next;
   });
+  const [androidStores, setAndroidStores] = useState(() => {
+    const next = emptyStores();
+    const android = app.platforms.find((p) => p.platform === "android");
+    for (const store of android?.downloadStores ?? []) {
+      if (isAndroidStore(store)) next[store] = true;
+    }
+    return next;
+  });
+  const [extraDownloads, setExtraDownloads] = useState<ExtraDownload[]>(() => {
+    const android = app.platforms.find((p) => p.platform === "android");
+    return android?.extraDownloads?.map((item) => ({ ...item })) ?? [];
+  });
 
   useEffect(() => {
     const nextEnabled = { android: false, ios: false, harmonyos: false } as Record<Platform, boolean>;
     const nextNames = { android: "", ios: "", harmonyos: "" } as Record<Platform, string>;
+    const nextStores = emptyStores();
     for (const p of app.platforms) {
       nextEnabled[p.platform] = true;
       nextNames[p.platform] = p.packageName;
     }
+    const android = app.platforms.find((p) => p.platform === "android");
+    for (const store of android?.downloadStores ?? []) {
+      if (isAndroidStore(store)) nextStores[store] = true;
+    }
     setEnabled(nextEnabled);
     setNames(nextNames);
+    setAndroidStores(nextStores);
+    setExtraDownloads(android?.extraDownloads?.map((item) => ({ ...item })) ?? []);
   }, [app.platforms]);
 
   async function save() {
@@ -295,6 +364,14 @@ function PlatformsSection({
       const platforms = PLATFORMS.filter((p) => enabled[p]).map((p) => ({
         platform: p,
         packageName: names[p].trim(),
+        ...(p === "android"
+          ? {
+              downloadStores: ANDROID_STORES.filter((store) => androidStores[store]),
+              extraDownloads: extraDownloads
+                .map((item) => ({ label: item.label.trim(), url: item.url.trim() }))
+                .filter((item) => item.label || item.url),
+            }
+          : {}),
       }));
       await api(`/dashboard/apps/${app.id}/platforms`, {
         method: "PUT",
@@ -308,7 +385,7 @@ function PlatformsSection({
     <section className="rounded-lg bg-white p-6 shadow-sm">
       <h2 className="font-medium">支持的平台</h2>
       <p className="mt-1 text-sm text-muted">
-        勾选端并填写包名。客户端用包名打开对应应用商店，不需要商店链接。
+        勾选端并填写包名。Android 还需选择上架的应用商店，并可补充官网或 APK 等额外下载地址。
       </p>
       {app.platforms.length === 0 && (
         <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -327,12 +404,84 @@ function PlatformsSection({
               {PLATFORM_LABELS[p]}
             </label>
             {enabled[p] && (
-              <input
-                className="mt-2 w-full rounded border border-line px-3 py-2 text-sm"
-                placeholder={PACKAGE_NAME_HINTS[p]}
-                value={names[p]}
-                onChange={(e) => setNames((prev) => ({ ...prev, [p]: e.target.value }))}
-              />
+              <>
+                <input
+                  className="mt-2 w-full rounded border border-line px-3 py-2 text-sm"
+                  placeholder={PACKAGE_NAME_HINTS[p]}
+                  value={names[p]}
+                  onChange={(e) => setNames((prev) => ({ ...prev, [p]: e.target.value }))}
+                />
+                {p === "android" && (
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <p className="text-sm font-medium">下载平台</p>
+                      <p className="mt-0.5 text-xs text-muted">用户在详情弹窗里点对应商店打开。都不选则走系统应用商店。</p>
+                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        {ANDROID_STORES.map((store) => (
+                          <label key={store} className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={androidStores[store]}
+                              onChange={(e) =>
+                                setAndroidStores((prev) => ({ ...prev, [store]: e.target.checked }))
+                              }
+                            />
+                            {ANDROID_STORE_LABELS[store]}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">额外下载地址</p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        最多 {EXTRA_DOWNLOAD_MAX} 条 https 链接，名称不超过 {EXTRA_DOWNLOAD_LABEL_MAX} 字。
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        {extraDownloads.map((item, index) => (
+                          <div key={index} className="flex flex-wrap items-center gap-2">
+                            <input
+                              className="w-28 rounded border border-line px-3 py-2 text-sm"
+                              placeholder="名称"
+                              value={item.label}
+                              onChange={(e) =>
+                                setExtraDownloads((prev) =>
+                                  prev.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)),
+                                )
+                              }
+                            />
+                            <input
+                              className="min-w-[12rem] flex-1 rounded border border-line px-3 py-2 text-sm"
+                              placeholder="https://"
+                              value={item.url}
+                              onChange={(e) =>
+                                setExtraDownloads((prev) =>
+                                  prev.map((row, i) => (i === index ? { ...row, url: e.target.value } : row)),
+                                )
+                              }
+                            />
+                            <button
+                              className="text-sm text-muted"
+                              type="button"
+                              onClick={() => setExtraDownloads((prev) => prev.filter((_, i) => i !== index))}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      {extraDownloads.length < EXTRA_DOWNLOAD_MAX && (
+                        <button
+                          className="mt-2 text-sm text-brand"
+                          type="button"
+                          onClick={() => setExtraDownloads((prev) => [...prev, { label: "", url: "" }])}
+                        >
+                          添加链接
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ))}

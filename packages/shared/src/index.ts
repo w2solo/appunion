@@ -67,8 +67,177 @@ export const ERROR_CODES = {
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 export const TAGLINE_MAX_GRAPHEMES = 30;
+export const DESCRIPTION_MAX_GRAPHEMES = 200;
+export const EXTRA_DOWNLOAD_MAX = 5;
+export const EXTRA_DOWNLOAD_LABEL_MAX = 20;
 export const ICON_MAX_BYTES = 512 * 1024;
 export const PACKAGE_NAME_MAX = 255;
+
+export const ANDROID_STORES = [
+  "play",
+  "huawei",
+  "honor",
+  "xiaomi",
+  "oppo",
+  "vivo",
+  "tencent",
+  "coolapk",
+] as const;
+export type AndroidStore = (typeof ANDROID_STORES)[number];
+
+export const ANDROID_STORE_LABELS: Record<AndroidStore, string> = {
+  play: "Google Play",
+  huawei: "华为应用市场",
+  honor: "荣耀应用市场",
+  xiaomi: "小米应用商店",
+  oppo: "OPPO 软件商店",
+  vivo: "vivo 应用商店",
+  tencent: "应用宝",
+  coolapk: "酷安",
+};
+
+export const ANDROID_FALLBACK_STORE = "market";
+export const ANDROID_FALLBACK_STORE_LABEL = "打开应用商店";
+
+export function isAndroidStore(value: string): value is AndroidStore {
+  return (ANDROID_STORES as readonly string[]).includes(value);
+}
+
+export function androidStoreUrl(store: AndroidStore, packageName: string): string {
+  switch (store) {
+    case "play":
+      return `market://details?id=${encodeURIComponent(packageName)}`;
+    case "huawei":
+      return `appmarket://details?id=${encodeURIComponent(packageName)}`;
+    case "honor":
+      return `honormarket://details?id=${encodeURIComponent(packageName)}`;
+    case "xiaomi":
+      return `mimarket://details?id=${encodeURIComponent(packageName)}`;
+    case "oppo":
+      return `oppomarket://details?packagename=${encodeURIComponent(packageName)}`;
+    case "vivo":
+      return `vivomarket://details?id=${encodeURIComponent(packageName)}`;
+    case "tencent":
+      return `tmast://appdetails?pname=${encodeURIComponent(packageName)}`;
+    case "coolapk":
+      return `coolmarket://apk/${encodeURIComponent(packageName)}`;
+  }
+}
+
+export function androidFallbackStoreUrl(packageName: string): string {
+  return `market://details?id=${encodeURIComponent(packageName)}`;
+}
+
+export type ExtraDownload = { label: string; url: string };
+
+export type ListingDownload =
+  | { kind: "store"; store: string; label: string; url: string }
+  | { kind: "url"; label: string; url: string };
+
+export type ListingItem = {
+  id: string;
+  name: string;
+  icon_url: string;
+  tagline: string;
+  description: string;
+  category: string;
+  subcategory: string;
+  platform: Platform;
+  package_name: string;
+  supported_platforms: Platform[];
+  downloads: ListingDownload[];
+};
+
+export function isValidHttpsUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function supportedPlatformsOf(platforms: { platform: string }[]): Platform[] {
+  const set = new Set(platforms.map((item) => item.platform));
+  return PLATFORMS.filter((platform) => set.has(platform));
+}
+
+export function parseDownloadStores(raw: unknown): { ok: true; value: AndroidStore[] } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "下载平台无效" };
+  const seen = new Set<string>();
+  const value: AndroidStore[] = [];
+  for (const item of raw) {
+    if (typeof item !== "string" || !isAndroidStore(item)) {
+      return { ok: false, error: "下载平台无效" };
+    }
+    if (seen.has(item)) continue;
+    seen.add(item);
+    value.push(item);
+  }
+  return { ok: true, value };
+}
+
+export function parseExtraDownloads(
+  raw: unknown,
+): { ok: true; value: ExtraDownload[] } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) return { ok: false, error: "额外下载地址无效" };
+  if (raw.length > EXTRA_DOWNLOAD_MAX) {
+    return { ok: false, error: `额外下载地址最多 ${EXTRA_DOWNLOAD_MAX} 条` };
+  }
+  const value: ExtraDownload[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") {
+      return { ok: false, error: "额外下载地址无效" };
+    }
+    const label = String("label" in item ? item.label : "").trim();
+    const url = String("url" in item ? item.url : "").trim();
+    if (!label) return { ok: false, error: "请填写下载名称" };
+    if (graphemeLength(label) > EXTRA_DOWNLOAD_LABEL_MAX) {
+      return { ok: false, error: `下载名称不能超过 ${EXTRA_DOWNLOAD_LABEL_MAX} 字` };
+    }
+    if (!isValidHttpsUrl(url)) {
+      return { ok: false, error: "下载地址须为 https 链接" };
+    }
+    value.push({ label, url });
+  }
+  return { ok: true, value };
+}
+
+export function buildDownloads(input: {
+  platform: Platform;
+  packageName: string;
+  downloadStores?: string[] | null;
+  extraDownloads?: ExtraDownload[] | null;
+}): ListingDownload[] {
+  if (input.platform === "android") {
+    const stores = (input.downloadStores ?? []).filter(isAndroidStore);
+    const extras = input.extraDownloads ?? [];
+    const downloads: ListingDownload[] = stores.map((store) => ({
+      kind: "store",
+      store,
+      label: ANDROID_STORE_LABELS[store],
+      url: androidStoreUrl(store, input.packageName),
+    }));
+    for (const extra of extras) {
+      downloads.push({ kind: "url", label: extra.label, url: extra.url });
+    }
+    if (downloads.length === 0) {
+      downloads.push({
+        kind: "store",
+        store: ANDROID_FALLBACK_STORE,
+        label: ANDROID_FALLBACK_STORE_LABEL,
+        url: androidFallbackStoreUrl(input.packageName),
+      });
+    }
+    return downloads;
+  }
+  if (input.platform === "ios") {
+    return [{ kind: "store", store: "appstore", label: "App Store", url: "" }];
+  }
+  return [{ kind: "store", store: "harmony", label: "鸿蒙应用市场", url: "" }];
+}
 export const LIST_SIZE_MIN = 1;
 export const LIST_SIZE_MAX = 50;
 export const LIST_SIZE_DEFAULT = 10;

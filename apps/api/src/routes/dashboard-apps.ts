@@ -16,6 +16,7 @@ import {
   upsertCategoryPair,
 } from "@appunions/db";
 import {
+  DESCRIPTION_MAX_GRAPHEMES,
   ERROR_CODES,
   ICON_MAX_BYTES,
   LIST_DEFAULT_PAGE_SIZE,
@@ -28,6 +29,8 @@ import {
   graphemeLength,
   isValidCategoryName,
   isValidPackageName,
+  parseDownloadStores,
+  parseExtraDownloads,
 } from "@appunions/shared";
 import { getDb } from "../db.js";
 import { readJson, routeParam, type AppEnv } from "../context.js";
@@ -43,6 +46,7 @@ import { utcDay } from "../lib/stats.js";
 const patchSchema = z.object({
   name: z.string().min(1).optional(),
   tagline: z.string().min(1).optional(),
+  description: z.string().optional(),
   category: z.string().min(1).optional(),
   subcategory: z.string().min(1).optional(),
   listSize: z.number().int().min(LIST_SIZE_MIN).max(LIST_SIZE_MAX).optional(),
@@ -54,6 +58,8 @@ const platformsSchema = z.object({
       z.object({
         platform: z.enum(PLATFORMS),
         packageName: z.string().min(1),
+        downloadStores: z.array(z.string()).optional(),
+        extraDownloads: z.array(z.object({ label: z.string(), url: z.string() })).optional(),
       }),
     )
     .max(PLATFORMS.length),
@@ -65,6 +71,7 @@ function publicFields(app: typeof apps.$inferSelect) {
     name: app.name,
     iconUrl: app.iconUrl,
     tagline: app.tagline,
+    description: app.description,
     category: app.category,
     subcategory: app.subcategory,
     listSize: app.listSize,
@@ -198,6 +205,7 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     const { fields, icon } = await parseMultipart(c);
     const name = fields.name?.trim();
     const tagline = fields.tagline?.trim();
+    const description = fields.description?.trim() ?? "";
     const category = fields.category;
     const subcategory = fields.subcategory;
     if (!name || !tagline || !category || !subcategory) {
@@ -205,7 +213,10 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     }
     const pair = await resolveCategoryPair(c, category, subcategory);
     if (graphemeLength(tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(c, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "简介不能超过 30 字");
+    }
+    if (graphemeLength(description) > DESCRIPTION_MAX_GRAPHEMES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "更多描述不能超过 200 字");
     }
     if (!icon) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "请上传图标");
@@ -224,6 +235,7 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
         name,
         iconUrl: "pending",
         tagline,
+        description,
         category: pair.category,
         subcategory: pair.subcategory,
         listSize: LIST_SIZE_DEFAULT,
@@ -271,7 +283,13 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "参数无效");
     }
     if (parsed.data.tagline && graphemeLength(parsed.data.tagline) > TAGLINE_MAX_GRAPHEMES) {
-      return sendError(c, 400, ERROR_CODES.invalid_params, "描述不能超过 30 字");
+      return sendError(c, 400, ERROR_CODES.invalid_params, "简介不能超过 30 字");
+    }
+    if (
+      parsed.data.description !== undefined &&
+      graphemeLength(parsed.data.description) > DESCRIPTION_MAX_GRAPHEMES
+    ) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "更多描述不能超过 200 字");
     }
     let category = row.category;
     let subcategory = row.subcategory;
@@ -289,6 +307,7 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
       .set({
         name: parsed.data.name ?? row.name,
         tagline: parsed.data.tagline ?? row.tagline,
+        description: parsed.data.description ?? row.description,
         category,
         subcategory,
         listSize: parsed.data.listSize ?? row.listSize,
@@ -313,6 +332,12 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "平台参数无效");
     }
     const seen = new Set<string>();
+    const normalized: {
+      platform: (typeof PLATFORMS)[number];
+      packageName: string;
+      downloadStores: string[];
+      extraDownloads: { label: string; url: string }[];
+    }[] = [];
     for (const item of parsed.data.platforms) {
       if (seen.has(item.platform)) {
         return sendError(c, 400, ERROR_CODES.invalid_params, "同一端只能填一次");
@@ -322,15 +347,28 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
       if (!isValidPackageName(packageName)) {
         return sendError(c, 400, ERROR_CODES.invalid_params, "包名格式无效，需为反向域名如 com.company.app");
       }
+      let downloadStores: string[] = [];
+      let extraDownloads: { label: string; url: string }[] = [];
+      if (item.platform === "android") {
+        const stores = parseDownloadStores(item.downloadStores);
+        if (!stores.ok) return sendError(c, 400, ERROR_CODES.invalid_params, stores.error);
+        const extras = parseExtraDownloads(item.extraDownloads);
+        if (!extras.ok) return sendError(c, 400, ERROR_CODES.invalid_params, extras.error);
+        downloadStores = stores.value;
+        extraDownloads = extras.value;
+      }
+      normalized.push({ platform: item.platform, packageName, downloadStores, extraDownloads });
     }
     try {
       await db.delete(appPlatforms).where(eq(appPlatforms.appId, id));
-      if (parsed.data.platforms.length > 0) {
+      if (normalized.length > 0) {
         await db.insert(appPlatforms).values(
-          parsed.data.platforms.map((item) => ({
+          normalized.map((item) => ({
             appId: id,
             platform: item.platform,
-            packageName: item.packageName.trim(),
+            packageName: item.packageName,
+            downloadStores: item.downloadStores,
+            extraDownloads: item.extraDownloads,
           })),
         );
       }

@@ -11,7 +11,6 @@ import { AppsPage } from "./pages/apps";
 import { NewAppPage } from "./pages/app-new";
 import { AppDetailPage } from "./pages/app-detail";
 import { AppStatsPage } from "./pages/app-stats";
-import { DocsApi, DocsIndex, DocsLayout, DocsRules, DocsUi } from "./pages/docs";
 import { OpsAdminsPage, OpsAnomaliesPage, OpsAppPage, OpsCategoriesPage, OpsConfigPage, OpsReviewPage } from "./pages/ops";
 
 if (
@@ -45,12 +44,8 @@ createRoot(document.getElementById("root")!).render(
               </RequireAuth>
             }
           >
-            <Route path="/docs" element={<DocsLayout />}>
-              <Route index element={<DocsIndex />} />
-              <Route path="api" element={<DocsApi />} />
-              <Route path="rules" element={<DocsRules />} />
-              <Route path="ui" element={<DocsUi />} />
-            </Route>
+            <Route path="/docs/*" element={<Navigate to="/apps" replace />} />
+            <Route path="/docs" element={<Navigate to="/apps" replace />} />
             <Route path="/apps" element={<AppsPage />} />
             <Route path="/apps/new" element={<NewAppPage />} />
             <Route path="/apps/:id" element={<AppDetailPage />} />

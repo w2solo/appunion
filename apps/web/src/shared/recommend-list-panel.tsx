@@ -1,8 +1,16 @@
+import { useState } from "react";
+import { PLATFORM_LABELS, type ListingDownload, type Platform } from "@appunions/shared";
+
 export type RecommendPanelItem = {
   id: string;
   name: string;
   iconUrl?: string;
   tagline: string;
+  description?: string;
+  supportedPlatforms?: Platform[];
+  downloads?: ListingDownload[];
+  packageName?: string;
+  platform?: Platform;
 };
 
 export function RecommendListPanel({
@@ -16,9 +24,12 @@ export function RecommendListPanel({
   shuffling?: boolean;
   emptyText?: string;
 }) {
+  const [selectedId, setSelected] = useState<string | null>(null);
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+
   return (
     <div className="overflow-hidden rounded-[22px] bg-[#f2f2f7] p-3">
-      <div className="overflow-hidden rounded-[14px] bg-white">
+      <div className="relative min-h-[420px] overflow-hidden rounded-[14px] bg-white">
         <div className="flex items-center justify-between px-4 py-2.5">
           <span className="text-[15px] font-semibold tracking-tight">发现应用</span>
           {onShuffle && (
@@ -26,7 +37,10 @@ export function RecommendListPanel({
               className="text-[13px] font-medium text-blue-600 disabled:opacity-50"
               disabled={shuffling}
               type="button"
-              onClick={onShuffle}
+              onClick={() => {
+                setSelected(null);
+                onShuffle();
+              }}
             >
               {shuffling ? "换一批…" : "换一批"}
             </button>
@@ -36,9 +50,13 @@ export function RecommendListPanel({
           <p className="border-t border-black/[0.06] px-4 py-8 text-center text-[13px] text-slate-500">{emptyText}</p>
         ) : (
           <ul>
-            {items.map((item, i) => (
-              <li key={item.id} className={i > 0 ? "border-t border-black/[0.06]" : "border-t border-black/[0.06]"}>
-                <div className="flex items-center gap-3 px-4 py-2.5">
+            {items.map((item) => (
+              <li key={item.id} className="border-t border-black/[0.06]">
+                <button
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left"
+                  type="button"
+                  onClick={() => setSelected(item.id)}
+                >
                   {item.iconUrl ? (
                     <img src={item.iconUrl} alt="" className="h-11 w-11 rounded-[10px] object-cover" />
                   ) : (
@@ -49,14 +67,90 @@ export function RecommendListPanel({
                     <div className="truncate text-[12px] leading-4 text-slate-500">{item.tagline}</div>
                   </div>
                   <span className="shrink-0 rounded-full bg-[#f2f2f7] px-3 py-1 text-[12px] font-medium text-slate-800">
-                    打开
+                    查看
                   </span>
-                </div>
+                </button>
               </li>
             ))}
           </ul>
         )}
+        {selected && (
+          <AppDetailSheet item={selected} onBack={() => setSelected(null)} />
+        )}
       </div>
     </div>
+  );
+}
+
+function AppDetailSheet({ item, onBack }: { item: RecommendPanelItem; onBack: () => void }) {
+  const platforms = item.supportedPlatforms ?? (item.platform ? [item.platform] : []);
+  const downloads = item.downloads ?? [];
+
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-white">
+      <div className="flex items-center gap-2 px-3 py-2.5">
+        <button className="px-1 text-[15px] text-blue-600" type="button" onClick={onBack}>
+          返回
+        </button>
+        <span className="text-[15px] font-semibold">应用详情</span>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto px-4 pb-5">
+        <div className="flex items-center gap-3">
+          {item.iconUrl ? (
+            <img src={item.iconUrl} alt="" className="h-16 w-16 rounded-[14px] object-cover" />
+          ) : (
+            <div className="h-16 w-16 rounded-[14px] bg-slate-200" />
+          )}
+          <div className="min-w-0">
+            <div className="text-[17px] font-semibold leading-5">{item.name}</div>
+            <div className="mt-1 text-[13px] leading-4 text-slate-500">{item.tagline}</div>
+          </div>
+        </div>
+        {platforms.length > 0 && (
+          <div className="mt-4">
+            <p className="text-[12px] font-medium text-slate-500">支持的平台</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {platforms.map((platform) => (
+                <span
+                  key={platform}
+                  className="rounded-full bg-[#f2f2f7] px-2.5 py-0.5 text-[12px] text-slate-700"
+                >
+                  {PLATFORM_LABELS[platform] ?? platform}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {item.description ? (
+          <div className="mt-4">
+            <p className="text-[12px] font-medium text-slate-500">介绍</p>
+            <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-slate-700">{item.description}</p>
+          </div>
+        ) : null}
+        <div className="mt-4">
+          <p className="text-[12px] font-medium text-slate-500">下载</p>
+          <div className="mt-2 space-y-2">
+            {downloads.length === 0 ? (
+              <p className="text-[13px] text-slate-500">暂无下载地址</p>
+            ) : (
+              downloads.map((download) => (
+                <DownloadButton key={`${download.kind}-${download.label}-${download.url}`} download={download} />
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DownloadButton({ download }: { download: ListingDownload }) {
+  return (
+    <button
+      className="w-full rounded-full bg-[#f2f2f7] px-4 py-2.5 text-[13px] font-medium text-slate-800"
+      type="button"
+    >
+      {download.label}
+    </button>
   );
 }

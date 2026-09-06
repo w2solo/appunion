@@ -31,9 +31,6 @@ export function AppLayout() {
         <NavLink className={navClass} to="/apps">
           我的应用
         </NavLink>
-        <NavLink className={navClass} to="/docs">
-          接入文档
-        </NavLink>
         {user?.role === "admin" && (
           <>
             <div className="mb-2 mt-6 text-xs uppercase text-muted">运营</div>

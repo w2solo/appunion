@@ -5,9 +5,21 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(path, { ...init, headers, credentials: "include" });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers, credentials: "include" });
+  } catch {
+    throw new Error("网络请求失败。请用 https:// 打开站点，刷新后再试");
+  }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(res.ok ? "服务器返回了无法解析的内容" : `请求失败（${res.status}）`);
+    }
+  }
   if (!res.ok) {
     const err = data as ApiError | null;
     const error = new Error(err?.error?.message ?? "请求失败") as Error & { status: number; code?: string };

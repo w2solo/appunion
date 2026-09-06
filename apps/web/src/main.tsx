@@ -14,6 +14,15 @@ import { AppStatsPage } from "./pages/app-stats";
 import { DocsApi, DocsIndex, DocsLayout, DocsRules, DocsUi } from "./pages/docs";
 import { OpsAdminsPage, OpsAnomaliesPage, OpsAppPage, OpsCategoriesPage, OpsConfigPage, OpsReviewPage } from "./pages/ops";
 
+if (
+  import.meta.env.PROD &&
+  window.location.protocol === "http:" &&
+  window.location.hostname !== "localhost" &&
+  window.location.hostname !== "127.0.0.1"
+) {
+  window.location.replace(`https://${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`);
+}
+
 function Forbidden() {
   return <p className="p-10">没有权限</p>;
 }

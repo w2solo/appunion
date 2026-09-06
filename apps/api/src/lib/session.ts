@@ -15,8 +15,8 @@ import {
 } from "./jwt.js";
 import { HttpError } from "../errors.js";
 
-export function publicUser(user: { id: string; email: string; role: string }) {
-  const superAdmin = isSuperAdminEmail(user.email);
+export function publicUser(user: { id: string; email: string; role: string }, superAdminEmail?: string) {
+  const superAdmin = isSuperAdminEmail(user.email, superAdminEmail);
   return {
     id: user.id,
     email: user.email,
@@ -86,7 +86,7 @@ export async function requireAdmin(c: Context<AppEnv>, next: Next) {
   if (!user) {
     throw new HttpError(401, ERROR_CODES.unauthorized, "Please sign in");
   }
-  const presented = publicUser(user);
+  const presented = publicUser(user, c.env.SUPER_ADMIN_EMAIL);
   if (presented.role !== "admin") {
     throw new HttpError(403, ERROR_CODES.forbidden, "Admin only");
   }

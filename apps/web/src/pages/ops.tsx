@@ -342,8 +342,8 @@ export function OpsAdminsPage() {
     <div className="max-w-2xl space-y-4">
       <h1 className="text-2xl font-semibold">管理员</h1>
       <p className="text-sm text-muted">
-        超级管理员固定为 <code className="rounded bg-slate-100 px-1">cmlanche@qq.com</code>
-        。只能把已经注册过的用户标成普通管理员；对方刷新页面或重新登录后即可看到审核台。普通管理员可以审核应用、改门槛参数，但不能再管理管理员。
+        超级管理员由环境变量 <code className="rounded bg-slate-100 px-1">SUPER_ADMIN_EMAIL</code>{" "}
+        指定。只能把已经注册过的用户标成普通管理员；对方刷新页面或重新登录后即可看到审核台。普通管理员可以审核应用、改门槛参数，但不能再管理管理员。
       </p>
       <form
         className="flex gap-2"

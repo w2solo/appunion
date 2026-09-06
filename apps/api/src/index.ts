@@ -34,7 +34,7 @@ if (!databaseUrl) {
 
 const { db } = createDb(databaseUrl);
 const env = buildEnv(db, createMemoryCache(), await createDiskIcons(iconsDir()), readProcessEnv());
-await seed(env.DB);
+await seed(env.DB, env.SUPER_ADMIN_EMAIL);
 
 if (process.env.NODE_ENV === "production") {
   attachSpa(app, webDistDir());

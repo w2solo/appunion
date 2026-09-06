@@ -46,10 +46,10 @@ export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
 export const ROLES = ["developer", "admin"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const SUPER_ADMIN_EMAIL = "cmlanche@qq.com";
-
-export function isSuperAdminEmail(email: string): boolean {
-  return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+export function isSuperAdminEmail(email: string, configured?: string): boolean {
+  const target = configured?.trim().toLowerCase();
+  if (!target) return false;
+  return email.trim().toLowerCase() === target;
 }
 
 export const ERROR_CODES = {

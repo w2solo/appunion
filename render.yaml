@@ -46,3 +46,5 @@ services:
         sync: false
       - key: CRON_SECRET
         generateValue: true
+      - key: SUPER_ADMIN_EMAIL
+        sync: false

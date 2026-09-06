@@ -14,6 +14,7 @@ export type Env = {
   SENDCLOUD_API_KEY: string;
   SENDCLOUD_FROM: string;
   CRON_SECRET: string;
+  SUPER_ADMIN_EMAIL: string;
 };
 
 export function readProcessEnv() {
@@ -30,6 +31,7 @@ export function readProcessEnv() {
     SENDCLOUD_API_KEY: process.env.SENDCLOUD_API_KEY ?? "",
     SENDCLOUD_FROM: process.env.SENDCLOUD_FROM ?? "",
     CRON_SECRET: process.env.CRON_SECRET ?? "",
+    SUPER_ADMIN_EMAIL: (process.env.SUPER_ADMIN_EMAIL ?? "").trim().toLowerCase(),
   };
 }
 

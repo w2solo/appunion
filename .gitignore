@@ -11,6 +11,7 @@ deploy/.env
 coverage
 .turbo
 data/
+.cursor/
 
 apps/web/dist
 apps/api/dist

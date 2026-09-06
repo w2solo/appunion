@@ -16,7 +16,7 @@ pnpm dev
 - API：http://localhost:8787（Vite 会把 `/v1` `/dashboard` `/admin` `/health` `/media` 代理过去）
 - 本地 Postgres 映射在 `localhost:55432`（避免和本机其它 Postgres 抢 5432）
 
-默认超级管理员邮箱固定为 `cmlanche@qq.com`。用这个邮箱登录后，左侧会出现「审核 / 异常 / 设置 / 管理员」。普通管理员由超管在「管理员」页搜索已注册用户后标记，只能审核和改门槛参数，不能再管管理员。登录走邮箱验证码，不用密码。发信走 [SendCloud](https://www.sendcloud.net/)（`SENDCLOUD_API_USER` / `SENDCLOUD_API_KEY` / `SENDCLOUD_FROM`）。没配时页面上会直接显示验证码。
+默认超级管理员由环境变量 `SUPER_ADMIN_EMAIL` 指定（本地写在 `.env`，生产写在 Render Environment）。用这个邮箱登录后，左侧会出现「审核 / 异常 / 设置 / 管理员」。普通管理员由超管在「管理员」页搜索已注册用户后标记，只能审核和改门槛参数，不能再管管理员。登录走邮箱验证码，不用密码。发信走 [SendCloud](https://www.sendcloud.net/)（`SENDCLOUD_API_USER` / `SENDCLOUD_API_KEY` / `SENDCLOUD_FROM`）。没配时页面上会直接显示验证码。
 
 ## 演示路径
 

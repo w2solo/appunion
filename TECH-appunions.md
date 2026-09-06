@@ -90,7 +90,7 @@ Web **不写业务规则**（是否在推荐池、去重、审核状态机都在
 | 未登录 | 无 cookie | 登录、注册、公开文档 |
 | 开发者 | `role = developer` | 我的应用、应用详情、数据、文档 |
 | 普通管理员 | `role = admin`，由超管标记已注册用户 | 开发者能进的全部 + `/ops/review` `/ops/anomalies` `/ops/config` `/ops/categories` |
-| 超级管理员 | 固定邮箱 `cmlanche@qq.com` | 普通管理员能进的全部 + `/ops/admins` |
+| 超级管理员 | 环境变量 `SUPER_ADMIN_EMAIL` 对应的已登录用户 | 普通管理员能进的全部 + `/ops/admins` |
 
 未登录访问 `/apps` → 跳 `/login?next=...`。开发者访问 `/ops` → 403 页（「没有权限」），不要伪装成 404。
 

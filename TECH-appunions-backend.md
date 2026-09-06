@@ -565,7 +565,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 
 ## 10. 运营 API（`/admin`）
 
-`role = admin` 的账号走同一登录接口，前端根据 `role` 和 `superAdmin` 显示运营台。超级管理员邮箱写死为 `cmlanche@qq.com`（seed 会确保该用户存在且 `role=admin`）。普通管理员由超管在后台搜索已注册用户后把 `developers.role` 改成 `admin`；登录时不再按邮箱名单覆盖角色。普通管理员可以审核和改门槛，不能调用用户管理接口。
+`role = admin` 的账号走同一登录接口，前端根据 `role` 和 `superAdmin` 显示运营台。超级管理员邮箱由环境变量 `SUPER_ADMIN_EMAIL` 指定（seed 会确保该用户存在且 `role=admin`）。普通管理员由超管在后台搜索已注册用户后把 `developers.role` 改成 `admin`；登录时不再按邮箱名单覆盖角色。普通管理员可以审核和改门槛，不能调用用户管理接口。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |

@@ -77,10 +77,12 @@ describe("package names", () => {
 });
 
 describe("super admin", () => {
-  it("matches the hardcoded email case-insensitively", () => {
-    assert.equal(isSuperAdminEmail("cmlanche@qq.com"), true);
-    assert.equal(isSuperAdminEmail("  CMLANCHE@qq.com "), true);
-    assert.equal(isSuperAdminEmail("admin@appunions.local"), false);
+  it("matches the configured email case-insensitively", () => {
+    assert.equal(isSuperAdminEmail("admin@example.com", "admin@example.com"), true);
+    assert.equal(isSuperAdminEmail("  ADMIN@example.com ", "admin@example.com"), true);
+    assert.equal(isSuperAdminEmail("other@example.com", "admin@example.com"), false);
+    assert.equal(isSuperAdminEmail("admin@example.com", ""), false);
+    assert.equal(isSuperAdminEmail("admin@example.com"), false);
   });
 });
 

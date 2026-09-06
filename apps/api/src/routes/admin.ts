@@ -327,7 +327,7 @@ export function adminRoutes(app: Hono<AppEnv>) {
           .from(developers)
           .orderBy(sql`case when ${developers.role} = 'admin' then 0 else 1 end`, desc(developers.createdAt))
           .limit(50);
-    return c.json({ items: rows.map(publicUser) });
+    return c.json({ items: rows.map((row) => publicUser(row, c.env.SUPER_ADMIN_EMAIL)) });
   });
 
   app.patch("/admin/users/:id", requireSuperAdmin, async (c) => {
@@ -340,7 +340,7 @@ export function adminRoutes(app: Hono<AppEnv>) {
     const rows = await db.select().from(developers).where(eq(developers.id, id)).limit(1);
     const target = rows[0];
     if (!target) return sendError(c, 404, ERROR_CODES.not_found, "用户不存在");
-    if (isSuperAdminEmail(target.email)) {
+    if (isSuperAdminEmail(target.email, c.env.SUPER_ADMIN_EMAIL)) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "不能更改超级管理员");
     }
     const [updated] = await db
@@ -348,6 +348,6 @@ export function adminRoutes(app: Hono<AppEnv>) {
       .set({ role: parsed.data.role })
       .where(eq(developers.id, id))
       .returning();
-    return c.json(publicUser(updated!));
+    return c.json(publicUser(updated!, c.env.SUPER_ADMIN_EMAIL));
   });
 }

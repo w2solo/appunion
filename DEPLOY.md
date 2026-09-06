@@ -26,7 +26,7 @@ pnpm db:migrate
 pnpm dev
 ```
 
-生产密钥在 Render Dashboard 的 Environment 里配置，不要写进 git。Blueprint 会生成 `JWT_SECRET` 和 `CRON_SECRET`。SendCloud 三项需手动填写后才能给用户发登录验证码；没配时生产环境不会在接口里回显验证码。
+生产密钥在 Render Dashboard 的 Environment 里配置，不要写进 git。Blueprint 会生成 `JWT_SECRET` 和 `CRON_SECRET`。`SUPER_ADMIN_EMAIL` 与 SendCloud 三项需手动填写：超管邮箱、发信账号。没配 SendCloud 时生产环境不会在接口里回显验证码。
 
 ## 1. 用 Blueprint 发布
 
@@ -35,10 +35,10 @@ pnpm dev
 3. 确认会创建：
    - Web Service `appunions`（Node 22，Disk 挂载 `/var/data`）
    - PostgreSQL `appunions-db`
-4. 填 SendCloud 三个环境变量（可稍后补）。
+4. 填 `SUPER_ADMIN_EMAIL` 和 SendCloud 三个环境变量（可稍后补）。
 5. 创建并等待第一次构建。`startCommand` 会先跑迁移再启动 API。
 
-第一次请求会写入默认分类和超级管理员 `cmlanche@qq.com`。
+第一次启动会写入默认分类。若配置了 `SUPER_ADMIN_EMAIL`，会确保该邮箱用户存在且为超级管理员。
 
 探活：
 
@@ -56,7 +56,7 @@ Render Dashboard → 该 Web Service → **Settings** → **Custom Domains**，�
 
 ## 3. 第一次登录
 
-浏览器打开服务 URL 或自定义域名，用超级管理员邮箱 `cmlanche@qq.com` 收验证码登录。左侧会出现审核 / 异常 / 设置 / 管理员。
+浏览器打开服务 URL 或自定义域名，用 `SUPER_ADMIN_EMAIL` 对应的邮箱收验证码登录。左侧会出现审核 / 异常 / 设置 / 管理员。
 
 普通管理员由超管在「管理员」页把已注册用户标上去。
 

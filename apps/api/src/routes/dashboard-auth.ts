@@ -71,11 +71,11 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
         .values({
           email,
           passwordHash: "otp",
-          role: isSuperAdminEmail(email) ? "admin" : "developer",
+          role: isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL) ? "admin" : "developer",
         })
         .returning();
       user = inserted[0]!;
-    } else if (isSuperAdminEmail(email) && user.role !== "admin") {
+    } else if (isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL) && user.role !== "admin") {
       const [updated] = await db
         .update(developers)
         .set({ role: "admin" })
@@ -83,8 +83,8 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
         .returning();
       user = updated!;
     }
-    await setAuthCookies(c, user.id, publicUser(user).role);
-    return c.json(publicUser(user));
+    await setAuthCookies(c, user.id, publicUser(user, c.env.SUPER_ADMIN_EMAIL).role);
+    return c.json(publicUser(user, c.env.SUPER_ADMIN_EMAIL));
   });
 
   app.post("/dashboard/auth/logout", async (c) => {
@@ -100,10 +100,10 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
     if (!user) {
       return c.json({ id, email: "", role: "developer", superAdmin: false });
     }
-    if (isSuperAdminEmail(user.email) && user.role !== "admin") {
+    if (isSuperAdminEmail(user.email, c.env.SUPER_ADMIN_EMAIL) && user.role !== "admin") {
       await db.update(developers).set({ role: "admin" }).where(eq(developers.id, user.id));
       user.role = "admin";
     }
-    return c.json(publicUser(user));
+    return c.json(publicUser(user, c.env.SUPER_ADMIN_EMAIL));
   });
 }

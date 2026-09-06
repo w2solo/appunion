@@ -90,7 +90,7 @@ export function AppIntegratePanel({
           <li>列表每行：圆角图标、名称、简介（<code>tagline</code>）、右侧「查看」。</li>
           <li>用户点整行后弹出应用详情：图标、名称、简介、更多描述（<code>description</code>）、支持的平台、下载渠道。</li>
           <li>
-            Android：按返回的 <code>downloads</code> 展示按钮，点哪个就打开哪条 <code>url</code>（商店 scheme 或 https）。不要自己拼商店地址。
+            Android：勾选的应用商店由服务端用 <code>package_name</code> 按各店 schema 拼好 <code>downloads[].url</code>，额外最多一条 https。点按钮直接打开返回的 <code>url</code>，不要自己拼商店地址。
           </li>
           <li>iOS / 鸿蒙：详情里用「打开 App Store / 鸿蒙应用市场」；<code>downloads[].url</code> 为空时，用 <code>package_name</code> 打开对应商店。</li>
           <li>卡片进入可视区域后再报曝光。点开详情不算点击；用户在详情里点某个下载按钮后再报点击，然后跳转。</li>
@@ -183,7 +183,8 @@ POST /v1/events/clicks?app_id=${appId}
             <code>supported_platforms</code>：该应用已配置的系统端，详情里用来展示「也支持 iOS」等。
           </li>
           <li>
-            <code>downloads</code>：当前请求端的下载按钮。Android 为商店 + 额外链接，每条都有 <code>kind / label / url</code>；点按钮直接打开{" "}
+            <code>downloads</code>：当前请求端的下载按钮。Android 商店项的 <code>url</code> 已按包名拼好（如华为{" "}
+            <code>appmarket://details?id=&lt;package_name&gt;</code>），另可有一条 https 额外下载；点按钮直接打开{" "}
             <code>url</code>。iOS / 鸿蒙通常一条 <code>kind: "store"</code> 且 <code>url</code> 为空，改用{" "}
             <code>package_name</code>。
           </li>
@@ -374,7 +375,7 @@ function buildIntegratePrompt({
 列表项字段：id, name, icon_url, tagline, description, category, subcategory, platform, package_name, supported_platforms, downloads。
 
 downloads 每条：{ "kind": "store" | "url", "store"?: string, "label": string, "url": string }。
-- Android：直接打开 downloads[].url（商店 scheme 或 https）。不要自己拼商店地址。若某端没有商店配置，服务端会给一条兜底「打开应用商店」。
+- Android：同时返回 package_name 和已拼好的 downloads[].url。商店 URL 由服务端用包名按 schema 生成（如华为 appmarket://details?id=<package_name>、系统商店 market://details?id=<package_name>）；额外最多一条 https。客户端直接打开 url，不要自己拼。
 - iOS / 鸿蒙：downloads 里通常一条 store，url 为空；用 package_name 打开对应应用市场。
 
 曝光请求体：

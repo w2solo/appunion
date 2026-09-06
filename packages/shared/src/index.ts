@@ -68,8 +68,9 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 export const TAGLINE_MAX_GRAPHEMES = 30;
 export const DESCRIPTION_MAX_GRAPHEMES = 200;
-export const EXTRA_DOWNLOAD_MAX = 5;
+export const EXTRA_DOWNLOAD_MAX = 1;
 export const EXTRA_DOWNLOAD_LABEL_MAX = 20;
+export const EXTRA_DOWNLOAD_DEFAULT_LABEL = "官网";
 export const ICON_MAX_BYTES = 512 * 1024;
 export const PACKAGE_NAME_MAX = 255;
 
@@ -184,16 +185,16 @@ export function parseExtraDownloads(
   if (raw == null) return { ok: true, value: [] };
   if (!Array.isArray(raw)) return { ok: false, error: "额外下载地址无效" };
   if (raw.length > EXTRA_DOWNLOAD_MAX) {
-    return { ok: false, error: `额外下载地址最多 ${EXTRA_DOWNLOAD_MAX} 条` };
+    return { ok: false, error: "额外下载地址只需填一条" };
   }
   const value: ExtraDownload[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") {
       return { ok: false, error: "额外下载地址无效" };
     }
-    const label = String("label" in item ? item.label : "").trim();
+    const label = String("label" in item ? item.label : "").trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL;
     const url = String("url" in item ? item.url : "").trim();
-    if (!label) return { ok: false, error: "请填写下载名称" };
+    if (!url) continue;
     if (graphemeLength(label) > EXTRA_DOWNLOAD_LABEL_MAX) {
       return { ok: false, error: `下载名称不能超过 ${EXTRA_DOWNLOAD_LABEL_MAX} 字` };
     }
@@ -213,7 +214,7 @@ export function buildDownloads(input: {
 }): ListingDownload[] {
   if (input.platform === "android") {
     const stores = (input.downloadStores ?? []).filter(isAndroidStore);
-    const extras = input.extraDownloads ?? [];
+    const extras = (input.extraDownloads ?? []).slice(0, EXTRA_DOWNLOAD_MAX);
     const downloads: ListingDownload[] = stores.map((store) => ({
       kind: "store",
       store,

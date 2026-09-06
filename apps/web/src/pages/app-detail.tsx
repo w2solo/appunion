@@ -4,7 +4,7 @@ import {
   ANDROID_STORE_LABELS,
   ANDROID_STORES,
   DESCRIPTION_MAX_GRAPHEMES,
-  EXTRA_DOWNLOAD_MAX,
+  EXTRA_DOWNLOAD_DEFAULT_LABEL,
   EXTRA_DOWNLOAD_LABEL_MAX,
   LIST_SIZE_MAX,
   LIST_SIZE_MIN,
@@ -336,9 +336,13 @@ function PlatformsSection({
     }
     return next;
   });
-  const [extraDownloads, setExtraDownloads] = useState<ExtraDownload[]>(() => {
+  const [extraLabel, setExtraLabel] = useState(() => {
     const android = app.platforms.find((p) => p.platform === "android");
-    return android?.extraDownloads?.map((item) => ({ ...item })) ?? [];
+    return android?.extraDownloads?.[0]?.label || EXTRA_DOWNLOAD_DEFAULT_LABEL;
+  });
+  const [extraUrl, setExtraUrl] = useState(() => {
+    const android = app.platforms.find((p) => p.platform === "android");
+    return android?.extraDownloads?.[0]?.url ?? "";
   });
 
   useEffect(() => {
@@ -356,7 +360,8 @@ function PlatformsSection({
     setEnabled(nextEnabled);
     setNames(nextNames);
     setAndroidStores(nextStores);
-    setExtraDownloads(android?.extraDownloads?.map((item) => ({ ...item })) ?? []);
+    setExtraLabel(android?.extraDownloads?.[0]?.label || EXTRA_DOWNLOAD_DEFAULT_LABEL);
+    setExtraUrl(android?.extraDownloads?.[0]?.url ?? "");
   }, [app.platforms]);
 
   async function save() {
@@ -367,9 +372,9 @@ function PlatformsSection({
         ...(p === "android"
           ? {
               downloadStores: ANDROID_STORES.filter((store) => androidStores[store]),
-              extraDownloads: extraDownloads
-                .map((item) => ({ label: item.label.trim(), url: item.url.trim() }))
-                .filter((item) => item.label || item.url),
+              extraDownloads: extraUrl.trim()
+                ? [{ label: extraLabel.trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL, url: extraUrl.trim() }]
+                : [],
             }
           : {}),
       }));
@@ -385,7 +390,7 @@ function PlatformsSection({
     <section className="rounded-lg bg-white p-6 shadow-sm">
       <h2 className="font-medium">支持的平台</h2>
       <p className="mt-1 text-sm text-muted">
-        勾选端并填写包名。Android 还需选择上架的应用商店，并可补充官网或 APK 等额外下载地址。
+        勾选端并填写包名。Android 勾选上架的应用商店即可，商店跳转由包名按各店 schema 拼好后随接口返回；额外只需再填一条 https 下载地址。
       </p>
       {app.platforms.length === 0 && (
         <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -415,7 +420,9 @@ function PlatformsSection({
                   <div className="mt-3 space-y-3">
                     <div>
                       <p className="text-sm font-medium">下载平台</p>
-                      <p className="mt-0.5 text-xs text-muted">用户在详情弹窗里点对应商店打开。都不选则走系统应用商店。</p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        不必填商店链接。接口会用包名拼出对应商店的跳转 URL。都不选则走系统应用商店。
+                      </p>
                       <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                         {ANDROID_STORES.map((store) => (
                           <label key={store} className="flex items-center gap-2">
@@ -434,50 +441,22 @@ function PlatformsSection({
                     <div>
                       <p className="text-sm font-medium">额外下载地址</p>
                       <p className="mt-0.5 text-xs text-muted">
-                        最多 {EXTRA_DOWNLOAD_MAX} 条 https 链接，名称不超过 {EXTRA_DOWNLOAD_LABEL_MAX} 字。
+                        只需一条 https 链接，例如官网或 APK。名称不超过 {EXTRA_DOWNLOAD_LABEL_MAX} 字，可留空。
                       </p>
-                      <div className="mt-2 space-y-2">
-                        {extraDownloads.map((item, index) => (
-                          <div key={index} className="flex flex-wrap items-center gap-2">
-                            <input
-                              className="w-28 rounded border border-line px-3 py-2 text-sm"
-                              placeholder="名称"
-                              value={item.label}
-                              onChange={(e) =>
-                                setExtraDownloads((prev) =>
-                                  prev.map((row, i) => (i === index ? { ...row, label: e.target.value } : row)),
-                                )
-                              }
-                            />
-                            <input
-                              className="min-w-[12rem] flex-1 rounded border border-line px-3 py-2 text-sm"
-                              placeholder="https://"
-                              value={item.url}
-                              onChange={(e) =>
-                                setExtraDownloads((prev) =>
-                                  prev.map((row, i) => (i === index ? { ...row, url: e.target.value } : row)),
-                                )
-                              }
-                            />
-                            <button
-                              className="text-sm text-muted"
-                              type="button"
-                              onClick={() => setExtraDownloads((prev) => prev.filter((_, i) => i !== index))}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        ))}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <input
+                          className="w-28 rounded border border-line px-3 py-2 text-sm"
+                          placeholder={EXTRA_DOWNLOAD_DEFAULT_LABEL}
+                          value={extraLabel}
+                          onChange={(e) => setExtraLabel(e.target.value)}
+                        />
+                        <input
+                          className="min-w-[12rem] flex-1 rounded border border-line px-3 py-2 text-sm"
+                          placeholder="https://"
+                          value={extraUrl}
+                          onChange={(e) => setExtraUrl(e.target.value)}
+                        />
                       </div>
-                      {extraDownloads.length < EXTRA_DOWNLOAD_MAX && (
-                        <button
-                          className="mt-2 text-sm text-brand"
-                          type="button"
-                          onClick={() => setExtraDownloads((prev) => [...prev, { label: "", url: "" }])}
-                        >
-                          添加链接
-                        </button>
-                      )}
                     </div>
                   </div>
                 )}

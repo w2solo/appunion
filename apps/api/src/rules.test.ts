@@ -194,5 +194,15 @@ describe("android downloads", () => {
     assert.deepEqual(parseDownloadStores(["xiaomi", "xiaomi"]), { ok: true, value: ["xiaomi"] });
     assert.equal(parseExtraDownloads([{ label: "官网", url: "http://x.com" }]).ok, false);
     assert.equal(parseExtraDownloads([{ label: "官网", url: "https://example.com" }]).ok, true);
+    assert.equal(
+      parseExtraDownloads([
+        { label: "官网", url: "https://a.com" },
+        { label: "APK", url: "https://b.com" },
+      ]).ok,
+      false,
+    );
+    const unnamed = parseExtraDownloads([{ url: "https://example.com/app" }]);
+    assert.equal(unnamed.ok, true);
+    if (unnamed.ok) assert.equal(unnamed.value[0]?.label, "官网");
   });
 });

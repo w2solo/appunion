@@ -166,16 +166,14 @@ export function OpsAppPage() {
                           .join("、")}
                   </p>
                   {(p.extraDownloads ?? []).length > 0 && (
-                    <ul className="list-disc pl-5">
-                      {p.extraDownloads?.map((item) => (
-                        <li key={`${item.label}-${item.url}`}>
-                          {item.label}：
-                          <a className="text-brand" href={item.url} rel="noreferrer" target="_blank">
-                            {item.url}
-                          </a>
-                        </li>
+                    <p>
+                      额外下载：
+                      {(p.extraDownloads ?? []).slice(0, 1).map((item) => (
+                        <a key={item.url} className="text-brand" href={item.url} rel="noreferrer" target="_blank">
+                          {item.label} {item.url}
+                        </a>
                       ))}
-                    </ul>
+                    </p>
                   )}
                 </div>
               )}

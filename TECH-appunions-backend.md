@@ -6,7 +6,7 @@
 | 完整设计 | [TECH-appunions.md](TECH-appunions.md)（Web 后台、文档站、运营台、部署） |
 | 范围 | 后端：开放 API、开发者后台 API、运营审核、统计、推荐池、基础反作弊 |
 | 不在本文 | Web 页面交互、接入文档正文、样式参考稿（见完整设计） |
-| 状态 | 待评审（技术栈已确认：Node + Hono + PostgreSQL，部署在 Render） |
+| 状态 | 待评审（技术栈已确认：Node + Hono + PostgreSQL，部署在 Ubuntu + 1Panel） |
 
 本文给后端评审用。整站怎么拼、有哪些页面，看完整设计。先看第 1 节选型，再看第 4 节模型和第 6～8 节三条主链路。文末是待拍板的决策。
 
@@ -35,23 +35,23 @@ V1 后端要同时撑住三件事：
 
 | 层 | 选择 | 原因 |
 | --- | --- | --- |
-| 运行时 | Node.js 22 长进程 | Render Web Service，同时托管 API 和静态资源 |
+| 运行时 | Node.js 22 长进程 | Docker 单容器，同时托管 API 和静态资源 |
 | 语言 | TypeScript | 和后台前端同语言，接口类型可共享 |
 | HTTP | Hono + `@hono/node-server` | 轻量路由，和 Fetch API 对齐 |
-| 主库 | PostgreSQL | Render 托管库，备份与连接串现成 |
+| 主库 | PostgreSQL | Compose 内 Postgres 16，数据在 Docker 卷 |
 | 缓存 / 限流 | 进程内 TTL Map | 单实例够用；V1 不加 Redis |
-| 对象存储 | Persistent Disk | App 图标；Render 尚无一等对象存储 |
+| 对象存储 | Docker 卷 | App 图标落本地磁盘，经 `/media/icons` 访问 |
 | 开发者登录 | 邮箱验证码，JWT（access 15min + refresh 30d，httpOnly cookie） | V1 不做 SSO、不做团队成员 |
 | 开放 API 鉴权 | 查询参数 `app_id`（宿主 UUID） | 客户端直连，不需要 API Key |
 | 后台任务 | 同一进程的 node-cron | 量小，先不引入独立队列 |
 | ORM | Drizzle | schema 即文档，迁移可读 |
 | 校验 | Zod | 请求体、查询参数统一校验 |
 
-部署形态：一个 Node 进程同时托管 `apps/web` 静态资源和 API。生产同一域名：`/v1`、`/dashboard`、`/admin`、`/health`、`/media` 进 Hono，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。单实例：磁盘和图标、进程内缓存都不能水平扩 Web。
+部署形态：Ubuntu + 1Panel。Docker Compose 起一个 Node 进程同时托管 `apps/web` 静态资源和 API，只绑本机端口，1Panel 反代域名和证书。生产同一域名：`/v1`、`/dashboard`、`/admin`、`/health`、`/media` 进 Hono，其余进 Web。页面路径不得占用这些前缀（页面用 `/apps`、`/docs`、`/ops`）。单实例：图标卷和进程内缓存都不能水平扩 api。
 
 **明确不选（V1）**
 
-- Cloudflare Workers / D1 / KV / R2：生产只跑在 Render Node + Postgres + Disk。
+- Cloudflare Workers / D1 / KV / R2、Render：生产只跑在 Ubuntu + 1Panel 的 Docker（Node + Postgres + 图标卷）。
 - Redis / Kafka / SQS / ClickHouse：日 10 万事件量级用不上。
 - 带 UI 的 SDK、安装归因、设备指纹。
 - 多租户分库、读写分离。
@@ -77,7 +77,7 @@ flowchart TB
   subgraph data [数据]
     PG[(PostgreSQL)]
     Redis[进程内缓存]
-    S3[Persistent Disk]
+    S3[图标卷]
   end
 
   Worker[node-cron]
@@ -683,6 +683,6 @@ packages/shared   Zod 类型、分类枚举、错误码
 
 **已拍板（不再讨论）**
 
-- 后端：Node + Hono + PostgreSQL，部署在 Render。
+- 后端：Node + Hono + PostgreSQL，部署在 Ubuntu + 1Panel。
 
 D1、D3、D6 对安全和数据质量影响最大，建议先定这三项再写代码。

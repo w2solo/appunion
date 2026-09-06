@@ -34,12 +34,12 @@ flowchart LR
   subgraph host [开发者的 App]
     Native[Android / iOS / 鸿蒙]
   end
-  subgraph render [Render]
+  subgraph server [Ubuntu_1Panel]
     Api[Hono Node]
   end
   PG[(PostgreSQL)]
   Mem[进程内缓存]
-  Disk[Persistent Disk]
+  Disk[图标卷]
 
   Web -->|cookie 登录| Api
   Native -->|query app_id| Api
@@ -67,7 +67,7 @@ flowchart LR
 
 ## 3. 技术栈
 
-整站部署在 Render 上：一个 Node Web Service 托管 API 和静态资源。
+整站部署在 Ubuntu + 1Panel 上：Docker Compose 起一个 Node 进程托管 API 和静态资源，前面由 1Panel 反代域名和证书。
 
 | 层 | 选择 |
 | --- | --- |
@@ -75,7 +75,7 @@ flowchart LR
 | UI | Tailwind CSS + 少量自研后台组件（表格、表单、对话框）。不引入很重的中台套件 |
 | 图表 | 轻量折线图（如 uPlot 或 Recharts），只用于 7/30 天趋势 |
 | 文档 | 仓库内 Markdown，构建时打进前端路由 `/docs/*` |
-| 后端 | Node + Hono + PostgreSQL + 进程内缓存 + Persistent Disk |
+| 后端 | Node + Hono + PostgreSQL + 进程内缓存 + 本地图标卷 |
 | 定时任务 | 同一进程的 node-cron |
 | 仓库 | 单仓 monorepo：`apps/web`、`apps/api`、`packages/*` |
 
@@ -391,12 +391,12 @@ flowchart TB
   Node -->|"/v1 /dashboard /admin /health /media"| Hono[Hono]
   Hono --> PG[(PostgreSQL)]
   Hono --> Mem[进程内缓存]
-  Hono --> Disk[Persistent Disk]
+  Hono --> Disk[图标卷]
 ```
 
 - Web：`vite build` 出静态文件，生产由 Node 托管，SPA 回退 `index.html`。
-- API 与 Cron：同一 Node 进程。
-- 密钥用 Render 环境变量，不进前端 bundle。
+- API 与 Cron：同一 Node 进程，只绑本机端口，1Panel 反代 80/443。
+- 密钥写在服务器 `deploy/.env`，不进前端 bundle、不进 git。
 
 ---
 
@@ -454,4 +454,4 @@ packages/shared   Zod、分类枚举、错误码、文档可引用的 API 类型
 | W3 | 创建 App 是否一次 multipart | **是** | 先建后传图标 |
 | W4 | 后台是否做手机版 | **不做**，桌面优先 | 响应式表格 |
 
-已拍板：Node.js 后端；不用 Cloudflare；开发者和运营共用一个 Web。
+已拍板：Node.js 后端；不用 Cloudflare / Render；开发者和运营共用一个 Web；生产部署 Ubuntu + 1Panel。

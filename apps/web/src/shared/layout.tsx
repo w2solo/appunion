@@ -23,8 +23,8 @@ export function PublicLayout() {
 export function AppLayout() {
   const { user, logout } = useAuth();
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 border-r border-line bg-white p-4 text-sm">
+    <div className="flex h-screen overflow-hidden">
+      <aside className="flex h-full w-56 shrink-0 flex-col overflow-y-auto border-r border-line bg-white p-4 text-sm">
         <Link to="/" className="mb-6 block font-semibold">
           AppUnions
         </Link>
@@ -54,8 +54,8 @@ export function AppLayout() {
           </>
         )}
       </aside>
-      <div className="flex-1">
-        <header className="flex items-center justify-end gap-4 border-b border-line bg-white px-6 py-3 text-sm">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex shrink-0 items-center justify-end gap-4 border-b border-line bg-white px-6 py-3 text-sm">
           <span className="text-muted">{user?.email}</span>
           <button
             className="text-brand"
@@ -68,8 +68,10 @@ export function AppLayout() {
             退出
           </button>
         </header>
-        <main className="mx-auto max-w-5xl p-6">
-          <Outlet />
+        <main className="flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-5xl p-6">
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

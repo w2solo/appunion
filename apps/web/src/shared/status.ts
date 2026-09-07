@@ -8,7 +8,7 @@ export function statusLabel(app: {
   graceDaysLeft?: number;
 }) {
   if (app.pausedByOps) return { text: "运营暂停", className: "bg-red-100 text-red-800" };
-  if (app.pausedByDeveloper) return { text: "已暂停", className: "bg-slate-200 text-slate-700" };
+  if (app.pausedByDeveloper) return { text: "已隐藏", className: "bg-slate-200 text-slate-700" };
   if (app.reviewStatus === "pending") return { text: "待审核", className: "bg-amber-100 text-amber-800" };
   if (app.reviewStatus === "rejected") return { text: "已拒绝", className: "bg-red-100 text-red-800" };
   if (app.inRecommendPool && (app.graceDaysLeft ?? 0) > 0) {

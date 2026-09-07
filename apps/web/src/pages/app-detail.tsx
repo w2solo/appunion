@@ -117,7 +117,13 @@ export function AppDetailPage() {
       {tab === "config" && <ConfigTab app={app} onSaved={load} />}
       {tab === "stats" && <AppStatsPanel id={id} />}
       {tab === "integrate" && (
-        <AppIntegratePanel appId={app.id} appName={app.name} platforms={app.platforms} listSize={app.listSize} />
+        <AppIntegratePanel
+          appId={app.id}
+          appName={app.name}
+          platforms={app.platforms}
+          listSize={app.listSize}
+          hidden={app.pausedByDeveloper}
+        />
       )}
     </div>
   );
@@ -133,7 +139,6 @@ function InfoTab({
   onSaved: () => Promise<void>;
 }) {
   const profile = useActionFeedback();
-  const pause = useActionFeedback();
   const { id } = useParams();
   const [tagline, setTagline] = useState(app.tagline);
   const [description, setDescription] = useState(app.description ?? "");
@@ -212,36 +217,6 @@ function InfoTab({
           </div>
         </form>
       </section>
-      <section className="rounded-lg bg-white p-6 shadow-sm">
-        <h2 className="font-medium">展示开关</h2>
-        {app.pausedByOps ? (
-          <p className="mt-2 text-sm text-red-700">运营已暂停本应用，开放接口不可用。</p>
-        ) : app.pausedByDeveloper ? (
-          <button
-            className="mt-3 rounded bg-brand px-3 py-2 text-sm text-white disabled:opacity-50"
-            disabled={pause.busy}
-            type="button"
-            onClick={() => void pause.run(() => api(`/dashboard/apps/${id}/resume`, { method: "POST" }).then(onSaved), "已恢复展示")}
-          >
-            {pause.busy ? "处理中…" : "恢复展示"}
-          </button>
-        ) : (
-          <button
-            className="mt-3 rounded border border-line px-3 py-2 text-sm disabled:opacity-50"
-            disabled={pause.busy}
-            type="button"
-            onClick={() => {
-              if (!confirm("暂停后不会出现在别人的列表里。开放接口仍可用。")) return;
-              void pause.run(() => api(`/dashboard/apps/${id}/pause`, { method: "POST" }).then(onSaved), "已暂停展示");
-            }}
-          >
-            {pause.busy ? "处理中…" : "暂停展示"}
-          </button>
-        )}
-        <div className="mt-2">
-          <ActionStatus error={pause.error} message={pause.message} />
-        </div>
-      </section>
     </div>
   );
 }
@@ -250,6 +225,7 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   const { id } = useParams();
   const [listSize, setListSize] = useState(app.listSize);
   const save = useActionFeedback();
+  const pause = useActionFeedback();
 
   useEffect(() => {
     setListSize(app.listSize);
@@ -270,32 +246,80 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   }
 
   return (
-    <section className="rounded-lg bg-white p-6 shadow-sm">
-      <h2 className="font-medium">列表面板</h2>
-      <p className="mt-1 text-sm text-muted">
-        客户端只展示一块内嵌列表，不提供「查看全部」。这里设置每次随机展示几条，换一批会按这个数量重新抽取。
-      </p>
-      <form className="mt-4 max-w-xs space-y-3" onSubmit={(e) => void onSubmit(e)}>
-        <label className="block text-sm">
-          展示个数（{LIST_SIZE_MIN}–{LIST_SIZE_MAX}）
-          <input
-            type="number"
-            min={LIST_SIZE_MIN}
-            max={LIST_SIZE_MAX}
-            step={1}
-            className="mt-1 w-full rounded border border-line px-3 py-2"
-            value={Number.isFinite(listSize) ? listSize : ""}
-            onChange={(e) => setListSize(e.target.value === "" ? Number.NaN : Number(e.target.value))}
-          />
-        </label>
-        <div className="flex flex-wrap items-center gap-3">
-          <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={save.busy}>
-            {save.busy ? "保存中…" : "保存"}
-          </button>
-          <ActionStatus error={save.error} message={save.message} />
-        </div>
-      </form>
-    </section>
+    <div className="space-y-6">
+      <section className="rounded-lg bg-white p-6 shadow-sm">
+        <h2 className="font-medium">展示开关</h2>
+        {app.pausedByOps ? (
+          <p className="mt-2 text-sm text-red-700">运营已暂停本应用，开放接口不可用。</p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted">
+              关闭后两件事同时发生：本应用不会出现在别人的互推列表里；你请求{" "}
+              <code>GET /v1/apps/recommend</code> 会返回 <code>hidden: true</code> 且没有列表。客户端应隐藏互推入口。这是「自己隐藏互推」的接口约定。
+            </p>
+            {app.pausedByDeveloper ? (
+              <button
+                className="mt-3 rounded bg-brand px-3 py-2 text-sm text-white disabled:opacity-50"
+                disabled={pause.busy}
+                type="button"
+                onClick={() =>
+                  void pause.run(
+                    () => api(`/dashboard/apps/${id}/resume`, { method: "POST" }).then(onSaved),
+                    "已打开展示",
+                  )
+                }
+              >
+                {pause.busy ? "处理中…" : "打开展示"}
+              </button>
+            ) : (
+              <button
+                className="mt-3 rounded border border-line px-3 py-2 text-sm disabled:opacity-50"
+                disabled={pause.busy}
+                type="button"
+                onClick={() => {
+                  if (!confirm("关闭后自己不会出现在别人列表里，请求接口也不会返回列表。确定关闭？")) return;
+                  void pause.run(
+                    () => api(`/dashboard/apps/${id}/pause`, { method: "POST" }).then(onSaved),
+                    "已隐藏互推",
+                  );
+                }}
+              >
+                {pause.busy ? "处理中…" : "关闭展示"}
+              </button>
+            )}
+            <div className="mt-2">
+              <ActionStatus error={pause.error} message={pause.message} />
+            </div>
+          </>
+        )}
+      </section>
+      <section className="rounded-lg bg-white p-6 shadow-sm">
+        <h2 className="font-medium">列表面板</h2>
+        <p className="mt-1 text-sm text-muted">
+          客户端只展示一块内嵌列表，不提供「查看全部」。这里设置每次随机展示几条，换一批会按这个数量重新抽取。
+        </p>
+        <form className="mt-4 max-w-xs space-y-3" onSubmit={(e) => void onSubmit(e)}>
+          <label className="block text-sm">
+            展示个数（{LIST_SIZE_MIN}–{LIST_SIZE_MAX}）
+            <input
+              type="number"
+              min={LIST_SIZE_MIN}
+              max={LIST_SIZE_MAX}
+              step={1}
+              className="mt-1 w-full rounded border border-line px-3 py-2"
+              value={Number.isFinite(listSize) ? listSize : ""}
+              onChange={(e) => setListSize(e.target.value === "" ? Number.NaN : Number(e.target.value))}
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={save.busy}>
+              {save.busy ? "保存中…" : "保存"}
+            </button>
+            <ActionStatus error={save.error} message={save.message} />
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -527,7 +551,7 @@ function StatusBar({ app }: { app: AppDetail }) {
   } else if (app.pausedByOps) {
     text = "运营已暂停本应用，开放接口不可用。";
   } else if (app.pausedByDeveloper) {
-    text = "已暂停，不会出现在别人的列表里。开放接口仍可用。";
+    text = "已隐藏互推：别人看不到你，你请求接口也不会拿到列表。";
   } else if (app.graceDaysLeft > 0) {
     text = `观察期还剩 ${app.graceDaysLeft} 天。请尽快在 App 里真实展示列表并上报曝光，否则到期会暂时离开推荐池。`;
   } else if (!app.inRecommendPool) {

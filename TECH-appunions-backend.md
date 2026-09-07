@@ -313,7 +313,7 @@ stateDiagram-v2
 | 429 | `rate_limited` | 超限 |
 | 500 | `internal_error` | |
 
-开发者自行暂停后：**仍允许**拉列表和上报（PRD）。仅运营暂停时封禁开放 API。这一点和「暂停后不出现在别人列表里」是两件事。
+开发者关闭展示（`paused_by_developer`）后：**仍允许**调用开放 API 和上报（HTTP 200），但 **recommend / list 不下发列表**，根上返回 `hidden: true`、`items: []`。这是「自己隐藏互推」，不是错误码。仅运营暂停时封禁开放 API（403）。关闭展示后自己也不出现在别人列表里。
 
 响应形状：
 
@@ -325,7 +325,11 @@ stateDiagram-v2
 
 Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 10，最小 1，最大 10。
 
-逻辑：
+根上始终返回 `hidden: boolean`（对应宿主 `paused_by_developer`）和 `items`。
+
+开发者关闭展示时：**HTTP 200**，`{ "hidden": true, "items": [] }`，不走 mock、不抽池、不写 `recent:{host}`。客户端应隐藏互推入口，不要当成空池轮询。这是自己隐藏互推的接口约定。
+
+逻辑（`hidden: false` 时）：
 
 1. 鉴权，校验宿主已配置请求的 `platform`。
 2. 读 Redis `pool:{platform}`（TTL = `recommend_cache_seconds`）。没有则从 DB 拉 `id WHERE in_recommend_pool AND 存在该端 app_platforms`，写入 Redis。
@@ -336,7 +340,7 @@ Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios`
 
 同一响应内 ID 不重复。不保证跨请求不重复。
 
-审核中（`pending`）跳过推荐池：返回固定 mock 目录，响应根上带 `mock: true`，不写 `recent:{host}`。
+审核中（`pending`）且未自隐藏：跳过推荐池，返回固定 mock 目录，响应根上带 `hidden: false, mock: true`，不写 `recent:{host}`。
 
 V1 池子最多几百个 ID，洗牌在内存做。不要 `ORDER BY random()` 全表扫。
 
@@ -348,7 +352,7 @@ Query：`app_id` 必填（宿主 UUID）；`platform` 必填；`page` 从 1，`p
 
 排序：`created_at DESC, id DESC`（稳定分页）。V1 无分类筛选。
 
-响应：`{ items, page, page_size, total }`。审核中同样返回 mock，并带 `mock: true`。
+响应：`{ hidden, items, page, page_size, total }`。开发者关闭展示时 `{ hidden: true, items: [], page, page_size, total: 0 }`。审核中且未自隐藏同样返回 mock，并带 `hidden: false, mock: true`。
 
 ### 6.4 展示字段（recommend 与 list 共用）
 
@@ -532,7 +536,7 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 | PATCH | `/dashboard/apps/:id` | 改名称/描述/分类。已通过的资料变更是否重新进审核：见 D3 |
 | PUT | `/dashboard/apps/:id/platforms` | 覆盖该 App 的端与包名。`{ platforms: [{ platform, packageName }] }` |
 | POST | `/dashboard/apps/:id/resubmit` | 拒绝后重提，`review_status → pending`，清 `rejected_reason` |
-| POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表 |
+| POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表；宿主 recommend 返回 `hidden: true`、空列表 |
 | POST | `/dashboard/apps/:id/resume` | 仅当 `paused_by_ops = false` |
 | POST | `/dashboard/apps/:id/api-key/rotate` | 旧 key 立刻 `revoked_at`，新明文只回一次 |
 | POST | `/dashboard/apps/:id/icon` | multipart，校验 mime 为 png/jpeg/webp，最大 512KB，上传对象存储 |
@@ -639,15 +643,16 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 
 1. 推荐：只出同端、不含自己、不含暂停、不含观察期后未达标。
 2. 推荐：同一响应无重复；limit 上限 10。
-3. 全量列表：观察期未达标的 App 仍出现；开发者暂停的不出现。
-4. 曝光：自推、跨端、未过审目标 → accepted false。
-5. 曝光：同一 idempotency_key 只计 1 次。
-6. 曝光：同一 client+target 在去重窗内第 2 次不计。
-7. 点击：无近期曝光 → false；有曝光且在 recent 列表 → true。
-8. key 重置后旧 key 401。
-9. 未过审宿主调 `/v1` → 403。
-10. worker：贡献跨过门槛后 `in_recommend_pool` 变为 true；降到门槛下变为 false。
-11. 运营暂停后，该 App 立刻从推荐缓存消失。
+3. 全量列表：观察期未达标的 App 仍出现；开发者关闭展示的不出现。
+4. 宿主关闭展示：`GET /v1/apps/recommend` 与 `GET /v1/apps` 仍 200，根上 `hidden: true`、`items` 为空，且不带 `mock`。
+5. 曝光：自推、跨端、未过审目标 → accepted false。
+6. 曝光：同一 idempotency_key 只计 1 次。
+7. 曝光：同一 client+target 在去重窗内第 2 次不计。
+8. 点击：无近期曝光 → false；有曝光且在 recent 列表 → true。
+9. key 重置后旧 key 401。
+10. 未过审宿主调 `/v1` → 403。
+11. worker：贡献跨过门槛后 `in_recommend_pool` 变为 true；降到门槛下变为 false。
+12. 运营暂停后，该 App 立刻从推荐缓存消失。
 
 ---
 
@@ -677,7 +682,7 @@ packages/shared   Zod 类型、分类枚举、错误码
 | D1 | 上报是否强制 `client_id` | **强制**。否则无法按用户去重曝光 | 不收 client_id，只做幂等 + 整 App 限流，统计会偏粗 |
 | D2 | 注册是否验证邮箱 | V1 **不验证**，尽快接入 | 接入 Resend/SES 后再加 |
 | D3 | 已通过 App 改名称/图标/包名 | **不自动打回待审**，运营抽查 | 改关键字段则回到 pending，更安全更烦 |
-| D4 | 开发者暂停后开放 API | **可用**（PRD） | 一并封禁，更狠但影响接入调试 |
+| D4 | 开发者关闭展示后开放 API | **仍 200**，但 recommend/list **不下发列表**，返回 `hidden: true`。曝光/点击仍可用。 | 一并 403 封禁，更狠但影响接入调试 |
 | D5 | 运营暂停后开放 API | **不可用** | 仍可用，只是自己不出现在别人列表 |
 | D6 | 点击必须命中 recent 下发列表 | **是** | 只要同端可见即可，实现简单但更好刷 |
 

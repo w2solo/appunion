@@ -7,6 +7,32 @@ import { cacheGet, cacheSet } from "../kv.js";
 
 type AppRow = typeof apps.$inferSelect;
 
+export function isSelfHidden(app: { pausedByDeveloper?: boolean | null }) {
+  return Boolean(app.pausedByDeveloper);
+}
+
+export function hiddenRecommendResponse() {
+  return { hidden: true as const, items: [] as ListingItem[] };
+}
+
+export function hiddenListResponse(page: number, pageSize: number) {
+  return {
+    hidden: true as const,
+    items: [] as ListingItem[],
+    page,
+    page_size: pageSize,
+    total: 0,
+  };
+}
+
+export function visibleRecommendResponse(items: ListingItem[], mock = false) {
+  return mock ? { hidden: false as const, items, mock: true as const } : { hidden: false as const, items };
+}
+
+export function visibleListResponse<T extends { items: unknown[] }>(data: T, mock = false) {
+  return mock ? { hidden: false as const, ...data, mock: true as const } : { hidden: false as const, ...data };
+}
+
 export function listingDto(
   app: AppRow,
   platform: Platform,

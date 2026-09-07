@@ -11,6 +11,12 @@ import {
   parseDownloadStores,
   parseExtraDownloads,
 } from "@appunions/shared";
+import {
+  hiddenListResponse,
+  hiddenRecommendResponse,
+  isSelfHidden,
+  visibleRecommendResponse,
+} from "./lib/catalog.js";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 import { isMockAppId, MOCK_APPS, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
@@ -50,6 +56,35 @@ describe("recommend pool eligibility", () => {
       computeInRecommendPool({ ...base, approvedAt, contributedImpressions7d: 100 }, config),
       true,
     );
+  });
+});
+
+describe("self-hidden listing responses", () => {
+  it("treats pausedByDeveloper as hidden", () => {
+    assert.equal(isSelfHidden({ pausedByDeveloper: true }), true);
+    assert.equal(isSelfHidden({ pausedByDeveloper: false }), false);
+    assert.equal(isSelfHidden({ pausedByDeveloper: null }), false);
+  });
+
+  it("returns empty items when hidden and does not include mock", () => {
+    const rec = hiddenRecommendResponse();
+    assert.equal(rec.hidden, true);
+    assert.deepEqual(rec.items, []);
+    assert.equal("mock" in rec, false);
+
+    const list = hiddenListResponse(1, 20);
+    assert.equal(list.hidden, true);
+    assert.equal(list.total, 0);
+    assert.equal(list.page, 1);
+    assert.equal(list.page_size, 20);
+    assert.deepEqual(list.items, []);
+  });
+
+  it("keeps mock lists visible with hidden false", () => {
+    const rec = visibleRecommendResponse(mockRecommend("android", 3), true);
+    assert.equal(rec.hidden, false);
+    assert.equal(rec.mock, true);
+    assert.equal(rec.items.length, 3);
   });
 });
 

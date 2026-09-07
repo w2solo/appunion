@@ -23,7 +23,16 @@ import { getDb } from "../db.js";
 import { readJson, type AppEnv } from "../context.js";
 import type { Env } from "../env.js";
 import { sendError } from "../errors.js";
-import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
+import {
+  hiddenListResponse,
+  hiddenRecommendResponse,
+  hostHasPlatform,
+  isSelfHidden,
+  listItems,
+  recommendItems,
+  visibleListResponse,
+  visibleRecommendResponse,
+} from "../lib/catalog.js";
 import { isMockAppId, mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { impressionDedupSet, rateLimit, recentUnion, rememberRecent } from "../kv.js";
 import { bumpStats } from "../lib/stats.js";
@@ -112,8 +121,11 @@ export function v1Routes(app: Hono<AppEnv>) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const limit = Math.min(q.data.limit ?? host.listSize, host.listSize, RECOMMEND_MAX);
+    if (isSelfHidden(host)) {
+      return c.json(hiddenRecommendResponse());
+    }
     if (host.reviewStatus === "pending") {
-      return c.json({ items: mockRecommend(q.data.platform, limit), mock: true });
+      return c.json(visibleRecommendResponse(mockRecommend(q.data.platform, limit), true));
     }
     const items = await recommendItems(db, c.env.KV, host.id, q.data.platform, limit);
     await rememberRecent(
@@ -121,7 +133,7 @@ export function v1Routes(app: Hono<AppEnv>) {
       host.id,
       items.map((i) => i.id),
     );
-    return c.json({ items });
+    return c.json(visibleRecommendResponse(items));
   });
 
   app.get("/v1/apps", async (c) => {
@@ -144,8 +156,11 @@ export function v1Routes(app: Hono<AppEnv>) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
     }
     const { platform, page, page_size } = q.data;
+    if (isSelfHidden(host)) {
+      return c.json(hiddenListResponse(page, page_size));
+    }
     if (host.reviewStatus === "pending") {
-      return c.json({ ...mockList(platform, page, page_size), mock: true });
+      return c.json(visibleListResponse(mockList(platform, page, page_size), true));
     }
     const data = await listItems(db, host.id, platform, page, page_size);
     await rememberRecent(
@@ -153,7 +168,7 @@ export function v1Routes(app: Hono<AppEnv>) {
       host.id,
       data.items.map((i) => i.id),
     );
-    return c.json(data);
+    return c.json(visibleListResponse(data));
   });
 
   app.post("/v1/events/impressions", async (c) => {

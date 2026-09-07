@@ -14,6 +14,7 @@ import {
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
 import { isMockAppId, MOCK_APPS, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
+import { parsePlatformsPayload } from "./lib/platform-params.js";
 
 describe("recommend pool eligibility", () => {
   const config = { graceDays: 7, reciprocityImpressions: 100 };
@@ -204,5 +205,63 @@ describe("android downloads", () => {
     const unnamed = parseExtraDownloads([{ url: "https://example.com/app" }]);
     assert.equal(unnamed.ok, true);
     if (unnamed.ok) assert.equal(unnamed.value[0]?.label, "官网");
+  });
+});
+
+describe("platform payload errors", () => {
+  it("names empty packageName with the platform label", () => {
+    const parsed = parsePlatformsPayload({
+      platforms: [
+        { platform: "android", packageName: "", downloadStores: [], extraDownloads: [] },
+        { platform: "harmonyos", packageName: "com.cmlanche.calshot_app.next" },
+      ],
+    });
+    assert.equal(parsed.ok, false);
+    if (!parsed.ok) assert.equal(parsed.error, "请填写 Android 包名");
+  });
+
+  it("rejects unsupported platforms, store shape, extras, and oversized lists", () => {
+    const unsupported = parsePlatformsPayload({
+      platforms: [{ platform: "windows", packageName: "com.company.app" }],
+    });
+    assert.equal(unsupported.ok, false);
+    if (!unsupported.ok) assert.equal(unsupported.error, "不支持的系统端");
+
+    const stores = parsePlatformsPayload({
+      platforms: [{ platform: "android", packageName: "com.company.app", downloadStores: "huawei" }],
+    });
+    assert.equal(stores.ok, false);
+    if (!stores.ok) assert.equal(stores.error, "下载平台无效");
+
+    const extras = parsePlatformsPayload({
+      platforms: [{ platform: "android", packageName: "com.company.app", extraDownloads: "https://x.com" }],
+    });
+    assert.equal(extras.ok, false);
+    if (!extras.ok) assert.equal(extras.error, "额外下载地址无效");
+
+    const tooMany = parsePlatformsPayload({
+      platforms: [
+        { platform: "android", packageName: "com.a.app" },
+        { platform: "ios", packageName: "com.a.app" },
+        { platform: "harmonyos", packageName: "com.a.app" },
+        { platform: "android", packageName: "com.b.app" },
+      ],
+    });
+    assert.equal(tooMany.ok, false);
+    if (!tooMany.ok) assert.equal(tooMany.error, "最多只能配置 3 个端");
+
+    const missing = parsePlatformsPayload({});
+    assert.equal(missing.ok, false);
+    if (!missing.ok) assert.equal(missing.error, "平台列表无效");
+  });
+
+  it("accepts a filled android + harmonyos payload", () => {
+    const parsed = parsePlatformsPayload({
+      platforms: [
+        { platform: "android", packageName: "com.cmlanche.calshot_app.next", downloadStores: [], extraDownloads: [] },
+        { platform: "harmonyos", packageName: "com.cmlanche.calshot_app.next" },
+      ],
+    });
+    assert.equal(parsed.ok, true);
   });
 });

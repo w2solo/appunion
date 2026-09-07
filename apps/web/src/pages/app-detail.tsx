@@ -14,6 +14,8 @@ import {
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
   isAndroidStore,
+  isValidHttpsUrl,
+  isValidPackageName,
   type ExtraDownload,
   type Platform,
 } from "@appunions/shared";
@@ -364,9 +366,40 @@ function PlatformsSection({
     setExtraUrl(android?.extraDownloads?.[0]?.url ?? "");
   }, [app.platforms]);
 
+  function togglePlatform(platform: Platform, checked: boolean) {
+    setEnabled((prev) => ({ ...prev, [platform]: checked }));
+    if (!checked) return;
+    setNames((prev) => {
+      if (prev[platform].trim()) return prev;
+      const borrowed = PLATFORMS.filter((other) => other !== platform)
+        .map((other) => prev[other].trim())
+        .find(Boolean);
+      if (!borrowed) return prev;
+      return { ...prev, [platform]: borrowed };
+    });
+  }
+
   async function save() {
     await saveFb.run(async () => {
-      const platforms = PLATFORMS.filter((p) => enabled[p]).map((p) => ({
+      const selected = PLATFORMS.filter((p) => enabled[p]);
+      for (const p of selected) {
+        const packageName = names[p].trim();
+        const label = PLATFORM_LABELS[p];
+        if (!packageName) throw new Error(`请填写 ${label} 包名`);
+        if (!isValidPackageName(packageName)) {
+          throw new Error(`${label} 包名格式无效，需为反向域名如 com.company.app`);
+        }
+      }
+      if (enabled.android && extraUrl.trim()) {
+        const downloadLabel = extraLabel.trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL;
+        if (graphemeLength(downloadLabel) > EXTRA_DOWNLOAD_LABEL_MAX) {
+          throw new Error(`下载名称不能超过 ${EXTRA_DOWNLOAD_LABEL_MAX} 字`);
+        }
+        if (!isValidHttpsUrl(extraUrl.trim())) {
+          throw new Error("下载地址须为 https 链接");
+        }
+      }
+      const platforms = selected.map((p) => ({
         platform: p,
         packageName: names[p].trim(),
         ...(p === "android"
@@ -404,7 +437,7 @@ function PlatformsSection({
               <input
                 type="checkbox"
                 checked={enabled[p]}
-                onChange={(e) => setEnabled((prev) => ({ ...prev, [p]: e.target.checked }))}
+                onChange={(e) => togglePlatform(p, e.target.checked)}
               />
               {PLATFORM_LABELS[p]}
             </label>

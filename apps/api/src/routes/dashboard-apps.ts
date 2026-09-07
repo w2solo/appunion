@@ -38,6 +38,7 @@ import { HttpError, sendError } from "../errors.js";
 import { generateApiKey } from "../lib/api-keys.js";
 import { hostHasPlatform, listItems, recommendItems } from "../lib/catalog.js";
 import { mockList, mockRecommend } from "../lib/mock-catalog.js";
+import { parsePlatformsPayload } from "../lib/platform-params.js";
 import { mustUser, requireUser } from "../lib/session.js";
 import { invalidatePoolCache } from "../kv.js";
 import { uploadIcon } from "../icons.js";
@@ -50,19 +51,6 @@ const patchSchema = z.object({
   category: z.string().min(1).optional(),
   subcategory: z.string().min(1).optional(),
   listSize: z.number().int().min(LIST_SIZE_MIN).max(LIST_SIZE_MAX).optional(),
-});
-
-const platformsSchema = z.object({
-  platforms: z
-    .array(
-      z.object({
-        platform: z.enum(PLATFORMS),
-        packageName: z.string().min(1),
-        downloadStores: z.array(z.string()).optional(),
-        extraDownloads: z.array(z.object({ label: z.string(), url: z.string() })).optional(),
-      }),
-    )
-    .max(PLATFORMS.length),
 });
 
 function publicFields(app: typeof apps.$inferSelect) {
@@ -327,9 +315,10 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     if (row.pausedByOps) {
       return sendError(c, 403, ERROR_CODES.forbidden, "运营已暂停，无法修改");
     }
-    const parsed = platformsSchema.safeParse(await readJson(c));
-    if (!parsed.success) {
-      return sendError(c, 400, ERROR_CODES.invalid_params, "平台参数无效");
+    const body = await readJson(c);
+    const parsed = parsePlatformsPayload(body);
+    if (!parsed.ok) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, parsed.error);
     }
     const seen = new Set<string>();
     const normalized: {

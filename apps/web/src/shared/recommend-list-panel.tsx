@@ -13,32 +13,74 @@ export type RecommendPanelItem = {
   platform?: Platform;
 };
 
+export type RecommendPanelBrand = {
+  name: string;
+  subtitle: string;
+  logoUrl?: string;
+};
+
 export function RecommendListPanel({
   items,
+  branding,
   onShuffle,
   shuffling,
   emptyText = "暂时没有可展示的应用",
+  onLoadDetail,
 }: {
   items: RecommendPanelItem[];
+  branding?: RecommendPanelBrand;
   onShuffle?: () => void;
   shuffling?: boolean;
   emptyText?: string;
+  onLoadDetail?: (id: string) => Promise<RecommendPanelItem | null>;
 }) {
-  const [selectedId, setSelected] = useState<string | null>(null);
-  const selected = items.find((item) => item.id === selectedId) ?? null;
+  const [selected, setSelected] = useState<RecommendPanelItem | null>(null);
+  const [detailError, setDetailError] = useState("");
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const title = branding?.name || "发现应用";
+
+  async function openItem(item: RecommendPanelItem) {
+    if (!onLoadDetail) {
+      setDetailError("");
+      setSelected(item);
+      return;
+    }
+    setLoadingId(item.id);
+    setDetailError("");
+    try {
+      const detail = await onLoadDetail(item.id);
+      if (detail) setSelected(detail);
+      else setDetailError("无法加载详情");
+    } catch (err) {
+      setDetailError(err instanceof Error ? err.message : "无法加载详情");
+    } finally {
+      setLoadingId(null);
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-[22px] bg-[#f2f2f7] p-3">
       <div className="relative min-h-[420px] overflow-hidden rounded-[14px] bg-white">
-        <div className="flex items-center justify-between px-4 py-2.5">
-          <span className="text-[15px] font-semibold tracking-tight">发现应用</span>
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {branding?.logoUrl ? (
+              <img src={branding.logoUrl} alt="" className="h-6 w-6 rounded object-cover" />
+            ) : null}
+            <div className="min-w-0">
+              <div className="truncate text-[15px] font-semibold tracking-tight">{title}</div>
+              {branding?.subtitle ? (
+                <div className="truncate text-[11px] leading-4 text-slate-500">{branding.subtitle}</div>
+              ) : null}
+            </div>
+          </div>
           {onShuffle && (
             <button
-              className="text-[13px] font-medium text-blue-600 disabled:opacity-50"
+              className="shrink-0 text-[13px] font-medium text-blue-600 disabled:opacity-50"
               disabled={shuffling}
               type="button"
               onClick={() => {
                 setSelected(null);
+                setDetailError("");
                 onShuffle();
               }}
             >
@@ -53,9 +95,10 @@ export function RecommendListPanel({
             {items.map((item) => (
               <li key={item.id} className="border-t border-black/[0.06]">
                 <button
-                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left"
+                  className="flex w-full items-center gap-3 px-4 py-2.5 text-left disabled:opacity-60"
+                  disabled={loadingId === item.id}
                   type="button"
-                  onClick={() => setSelected(item.id)}
+                  onClick={() => void openItem(item)}
                 >
                   {item.iconUrl ? (
                     <img src={item.iconUrl} alt="" className="h-11 w-11 rounded-[10px] object-cover" />
@@ -67,13 +110,16 @@ export function RecommendListPanel({
                     <div className="truncate text-[12px] leading-4 text-slate-500">{item.tagline}</div>
                   </div>
                   <span className="shrink-0 rounded-full bg-[#f2f2f7] px-3 py-1 text-[12px] font-medium text-slate-800">
-                    查看
+                    {loadingId === item.id ? "…" : "查看"}
                   </span>
                 </button>
               </li>
             ))}
           </ul>
         )}
+        {detailError ? (
+          <p className="border-t border-black/[0.06] px-4 py-2 text-[12px] text-red-600">{detailError}</p>
+        ) : null}
         {selected && (
           <AppDetailSheet item={selected} onBack={() => setSelected(null)} />
         )}

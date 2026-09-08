@@ -200,8 +200,12 @@ export const platformConfig = pgTable("platform_config", {
   recommendCacheSeconds: integer("recommend_cache_seconds").notNull().default(30),
   rateRecommendPerMin: integer("rate_recommend_per_min").notNull().default(60),
   rateListPerMin: integer("rate_list_per_min").notNull().default(60),
+  rateInfoPerMin: integer("rate_info_per_min").notNull().default(120),
   rateImpressionsPerMin: integer("rate_impressions_per_min").notNull().default(120),
   rateClicksPerMin: integer("rate_clicks_per_min").notNull().default(60),
+  unionName: text("union_name").notNull().default("应用互推联盟"),
+  unionSubtitle: text("union_subtitle").notNull().default("发现更多好用的 App"),
+  unionLogoUrl: text("union_logo_url").notNull().default(""),
 });
 
 export const anomalyFlags = pgTable("anomaly_flags", {

@@ -17,12 +17,22 @@ import {
   renameCategory,
   syncAppPoolFlag,
 } from "@appunions/db";
-import { ERROR_CODES, isSuperAdminEmail, isValidCategoryName } from "@appunions/shared";
+import {
+  ERROR_CODES,
+  graphemeLength,
+  ICON_MAX_BYTES,
+  isSuperAdminEmail,
+  isValidCategoryName,
+  UNION_LOGO_ID,
+  UNION_NAME_MAX_GRAPHEMES,
+  UNION_SUBTITLE_MAX_GRAPHEMES,
+} from "@appunions/shared";
 import { getDb } from "../db.js";
 import { readJson, routeParam, type AppEnv } from "../context.js";
 import { sendError } from "../errors.js";
 import { mustUser, publicUser, requireAdmin, requireSuperAdmin } from "../lib/session.js";
 import { invalidatePoolCache } from "../kv.js";
+import { uploadIcon } from "../icons.js";
 
 const configPatch = z.object({
   graceDays: z.number().int().min(1).max(90).optional(),
@@ -31,8 +41,11 @@ const configPatch = z.object({
   recommendCacheSeconds: z.number().int().min(1).max(600).optional(),
   rateRecommendPerMin: z.number().int().min(1).max(10_000).optional(),
   rateListPerMin: z.number().int().min(1).max(10_000).optional(),
+  rateInfoPerMin: z.number().int().min(1).max(10_000).optional(),
   rateImpressionsPerMin: z.number().int().min(1).max(10_000).optional(),
   rateClicksPerMin: z.number().int().min(1).max(10_000).optional(),
+  unionName: z.string().min(1).optional(),
+  unionSubtitle: z.string().min(1).optional(),
 });
 
 function withOpsMeta<T extends object>(c: { env: { SUPER_ADMIN_EMAIL: string } }, row: T) {
@@ -227,6 +240,14 @@ export function adminRoutes(app: Hono<AppEnv>) {
     if (!parsed.success) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "参数无效");
     }
+    const unionName = parsed.data.unionName?.trim();
+    const unionSubtitle = parsed.data.unionSubtitle?.trim();
+    if (unionName !== undefined && graphemeLength(unionName) > UNION_NAME_MAX_GRAPHEMES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, `对外名称不能超过 ${UNION_NAME_MAX_GRAPHEMES} 字`);
+    }
+    if (unionSubtitle !== undefined && graphemeLength(unionSubtitle) > UNION_SUBTITLE_MAX_GRAPHEMES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, `宣传语不能超过 ${UNION_SUBTITLE_MAX_GRAPHEMES} 字`);
+    }
     const current = await getConfig(db);
     const [updated] = await db
       .update(platformConfig)
@@ -238,13 +259,48 @@ export function adminRoutes(app: Hono<AppEnv>) {
         recommendCacheSeconds: parsed.data.recommendCacheSeconds ?? current.recommendCacheSeconds,
         rateRecommendPerMin: parsed.data.rateRecommendPerMin ?? current.rateRecommendPerMin,
         rateListPerMin: parsed.data.rateListPerMin ?? current.rateListPerMin,
+        rateInfoPerMin: parsed.data.rateInfoPerMin ?? current.rateInfoPerMin,
         rateImpressionsPerMin: parsed.data.rateImpressionsPerMin ?? current.rateImpressionsPerMin,
         rateClicksPerMin: parsed.data.rateClicksPerMin ?? current.rateClicksPerMin,
+        unionName: unionName || current.unionName,
+        unionSubtitle: unionSubtitle || current.unionSubtitle,
       })
       .where(eq(platformConfig.id, 1))
       .returning();
-    await refreshRecommendPool(db);
-    await invalidatePoolCache(c.env.KV);
+    const shouldRefreshPool =
+      (parsed.data.graceDays !== undefined && parsed.data.graceDays !== current.graceDays) ||
+      (parsed.data.reciprocityImpressions !== undefined &&
+        parsed.data.reciprocityImpressions !== current.reciprocityImpressions);
+    if (shouldRefreshPool) {
+      await refreshRecommendPool(db);
+      await invalidatePoolCache(c.env.KV);
+    }
+    return c.json(withOpsMeta(c, updated!));
+  });
+
+  app.post("/admin/config/logo", async (c) => {
+    const db = getDb(c.env.DB);
+    const body = await c.req.parseBody();
+    let icon: { buf: Uint8Array; mime: string } | null = null;
+    for (const value of Object.values(body)) {
+      if (value instanceof File) {
+        icon = { buf: new Uint8Array(await value.arrayBuffer()), mime: value.type };
+        break;
+      }
+    }
+    if (!icon) return sendError(c, 400, ERROR_CODES.invalid_params, "请上传图标");
+    if (!["image/png", "image/jpeg", "image/webp"].includes(icon.mime)) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标需为 png/jpeg/webp");
+    }
+    if (icon.buf.byteLength > ICON_MAX_BYTES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "图标不能超过 512KB");
+    }
+    const unionLogoUrl = await uploadIcon(c.env.ICONS, UNION_LOGO_ID, icon.buf, icon.mime);
+    const [updated] = await db
+      .update(platformConfig)
+      .set({ unionLogoUrl })
+      .where(eq(platformConfig.id, 1))
+      .returning();
     return c.json(withOpsMeta(c, updated!));
   });
 

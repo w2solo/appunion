@@ -66,6 +66,12 @@ export const ERROR_CODES = {
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
+export const UNION_NAME_DEFAULT = "应用互推联盟";
+export const UNION_SUBTITLE_DEFAULT = "发现更多好用的 App";
+export const UNION_NAME_MAX_GRAPHEMES = 20;
+export const UNION_SUBTITLE_MAX_GRAPHEMES = 40;
+export const UNION_LOGO_ID = "union-logo";
+
 export const TAGLINE_MAX_GRAPHEMES = 30;
 export const DESCRIPTION_MAX_GRAPHEMES = 200;
 export const EXTRA_DOWNLOAD_MAX = 1;
@@ -135,11 +141,14 @@ export type ListingDownload =
   | { kind: "store"; store: string; label: string; url: string }
   | { kind: "url"; label: string; url: string };
 
-export type ListingItem = {
+export type ListingCard = {
   id: string;
   name: string;
   icon_url: string;
   tagline: string;
+};
+
+export type ListingItem = ListingCard & {
   description: string;
   category: string;
   subcategory: string;
@@ -148,6 +157,22 @@ export type ListingItem = {
   supported_platforms: Platform[];
   downloads: ListingDownload[];
 };
+
+export type UnionInfo = {
+  name: string;
+  subtitle: string;
+  logo_url: string;
+  hidden: boolean;
+};
+
+export function listingCardOf(item: ListingCard): ListingCard {
+  return {
+    id: item.id,
+    name: item.name,
+    icon_url: item.icon_url,
+    tagline: item.tagline,
+  };
+}
 
 export function isValidHttpsUrl(value: string): boolean {
   try {

@@ -37,16 +37,20 @@ import { readJson, routeParam, type AppEnv } from "../context.js";
 import { HttpError, sendError } from "../errors.js";
 import { generateApiKey } from "../lib/api-keys.js";
 import {
+  appDetail,
+  hiddenDetailResponse,
   hiddenListResponse,
   hiddenRecommendResponse,
   hostHasPlatform,
   isSelfHidden,
   listItems,
   recommendItems,
+  unionInfoResponse,
+  visibleDetailResponse,
   visibleListResponse,
   visibleRecommendResponse,
 } from "../lib/catalog.js";
-import { mockList, mockRecommend } from "../lib/mock-catalog.js";
+import { mockDetail, mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { parsePlatformsPayload } from "../lib/platform-params.js";
 import { mustUser, requireUser } from "../lib/session.js";
 import { invalidatePoolCache } from "../kv.js";
@@ -501,6 +505,46 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
     }
     const items = await recommendItems(db, c.env.KV, id, q.data.platform, row.listSize);
     return c.json(visibleRecommendResponse(items));
+  });
+
+  app.get("/dashboard/apps/:id/preview/info", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
+    return c.json(unionInfoResponse(await getConfig(db), isSelfHidden(row)));
+  });
+
+  app.get("/dashboard/apps/:id/preview/detail", requireUser, async (c) => {
+    const user = mustUser(c);
+    const id = routeParam(c, "id");
+    const db = getDb(c.env.DB);
+    const row = await ownedApp(db, user.id, id);
+    if (!row) return sendError(c, 404, ERROR_CODES.not_found, "应用不存在");
+    const q = z
+      .object({
+        platform: z.enum(PLATFORMS),
+        target_id: z.string().uuid(),
+      })
+      .safeParse(c.req.query());
+    if (!q.success) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform 和 target_id");
+    }
+    if (!(await hostHasPlatform(db, id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    if (isSelfHidden(row)) {
+      return c.json(hiddenDetailResponse());
+    }
+    if (row.reviewStatus === "pending") {
+      const item = mockDetail(q.data.target_id, q.data.platform);
+      if (!item) return sendError(c, 404, ERROR_CODES.target_not_found, "应用不存在");
+      return c.json(visibleDetailResponse(item, true));
+    }
+    const item = await appDetail(db, id, q.data.target_id, q.data.platform);
+    if (!item) return sendError(c, 404, ERROR_CODES.target_not_found, "应用不存在");
+    return c.json(visibleDetailResponse(item));
   });
 
   app.get("/dashboard/apps/:id/preview/apps", requireUser, async (c) => {

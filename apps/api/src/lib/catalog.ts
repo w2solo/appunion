@@ -1,6 +1,23 @@
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
-import { appPlatforms, apps, getConfig, platformsForApps, type AppDb, type AppPlatformPublic } from "@appunions/db";
-import { buildDownloads, supportedPlatformsOf, type ListingItem, type Platform } from "@appunions/shared";
+import {
+  appPlatforms,
+  apps,
+  getConfig,
+  isCatalogVisible,
+  platformsForApps,
+  type AppDb,
+  type AppPlatformPublic,
+  type PlatformConfig,
+} from "@appunions/db";
+import {
+  buildDownloads,
+  listingCardOf,
+  supportedPlatformsOf,
+  type ListingCard,
+  type ListingItem,
+  type Platform,
+  type UnionInfo,
+} from "@appunions/shared";
 import { pickRandom } from "./random.js";
 import type { CacheStore } from "../cache.js";
 import { cacheGet, cacheSet } from "../kv.js";
@@ -11,26 +28,46 @@ export function isSelfHidden(app: { pausedByDeveloper?: boolean | null }) {
   return Boolean(app.pausedByDeveloper);
 }
 
+export function unionInfoResponse(
+  config: Pick<PlatformConfig, "unionName" | "unionSubtitle" | "unionLogoUrl">,
+  hidden: boolean,
+): UnionInfo {
+  return {
+    name: config.unionName,
+    subtitle: config.unionSubtitle,
+    logo_url: config.unionLogoUrl,
+    hidden,
+  };
+}
+
 export function hiddenRecommendResponse() {
-  return { hidden: true as const, items: [] as ListingItem[] };
+  return { hidden: true as const, items: [] as ListingCard[] };
 }
 
 export function hiddenListResponse(page: number, pageSize: number) {
   return {
     hidden: true as const,
-    items: [] as ListingItem[],
+    items: [] as ListingCard[],
     page,
     page_size: pageSize,
     total: 0,
   };
 }
 
-export function visibleRecommendResponse(items: ListingItem[], mock = false) {
+export function hiddenDetailResponse() {
+  return { hidden: true as const };
+}
+
+export function visibleRecommendResponse(items: ListingCard[], mock = false) {
   return mock ? { hidden: false as const, items, mock: true as const } : { hidden: false as const, items };
 }
 
 export function visibleListResponse<T extends { items: unknown[] }>(data: T, mock = false) {
   return mock ? { hidden: false as const, ...data, mock: true as const } : { hidden: false as const, ...data };
+}
+
+export function visibleDetailResponse(item: ListingItem, mock = false) {
+  return mock ? { hidden: false as const, item, mock: true as const } : { hidden: false as const, item };
 }
 
 export function listingDto(
@@ -100,6 +137,15 @@ function listingsFromRows(
     .filter((item): item is ListingItem => Boolean(item));
 }
 
+function cardsFromRows(
+  platform: Platform,
+  appRows: AppRow[],
+  listings: Map<string, AppPlatformPublic[]>,
+  order: string[],
+): ListingCard[] {
+  return listingsFromRows(platform, appRows, listings, order).map(listingCardOf);
+}
+
 export async function recommendItems(
   db: AppDb,
   kv: CacheStore,
@@ -113,7 +159,7 @@ export async function recommendItems(
   if (picked.length === 0) return [];
   const rows = await db.select().from(apps).where(inArray(apps.id, picked));
   const listings = await platformsForApps(db, picked);
-  return listingsFromRows(platform, rows, listings, picked);
+  return cardsFromRows(platform, rows, listings, picked);
 }
 
 export async function listItems(
@@ -150,7 +196,7 @@ export async function listItems(
     appRows.map((app) => app.id),
   );
   return {
-    items: listingsFromRows(
+    items: cardsFromRows(
       platform,
       appRows,
       listings,
@@ -160,4 +206,21 @@ export async function listItems(
     page_size: pageSize,
     total,
   };
+}
+
+export async function appDetail(
+  db: AppDb,
+  hostId: string,
+  targetId: string,
+  platform: Platform,
+): Promise<ListingItem | null> {
+  if (targetId === hostId) return null;
+  const rows = await db.select().from(apps).where(eq(apps.id, targetId)).limit(1);
+  const app = rows[0];
+  if (!app || !isCatalogVisible(app)) return null;
+  const listings = await platformsForApps(db, [targetId]);
+  const platforms = listings.get(targetId) ?? [];
+  const current = platforms.find((item) => item.platform === platform);
+  if (!current) return null;
+  return listingDto(app, platform, current, platforms);
 }

@@ -25,6 +25,7 @@ pnpm dev
 3. 用 curl 调开放接口（把 app_id 换成你的应用 ID）：
 
 ```bash
+curl -s 'http://localhost:8787/v1/info?app_id=<你的 app_id>'
 curl -s 'http://localhost:8787/v1/apps/recommend?app_id=<你的 app_id>&platform=android'
 ```
 

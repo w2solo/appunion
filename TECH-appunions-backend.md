@@ -254,6 +254,10 @@ AND paused_by_ops = false
 | rate_impressions_per_min | 120 | 按条数计，不是按请求计 |
 | rate_clicks_per_min | 60 | |
 | rate_list_per_min | 60 | |
+| rate_info_per_min | 120 | 基本信息接口 |
+| union_name | 应用互推联盟 | 对外名称，管理员改 |
+| union_subtitle | 发现更多好用的 App | 对外宣传语 |
+| union_logo_url | 空 | 品牌 logo，经 `/media/icons` 访问 |
 
 门槛是运营参数，改这一行即可，不用发版。
 
@@ -309,11 +313,11 @@ stateDiagram-v2
 | 401 | `unauthorized` | 缺 `app_id` / 不是合法 UUID / 应用不存在 |
 | 403 | `app_not_approved` | 宿主已被拒绝 |
 | 403 | `app_paused_by_ops` | 运营暂停宿主（仍不允许调用，避免作弊号继续报量） |
-| 404 | `target_not_found` | 上报目标不存在 |
+| 404 | `target_not_found` | 详情目标不存在 / 上报目标不存在 |
 | 429 | `rate_limited` | 超限 |
 | 500 | `internal_error` | |
 
-开发者关闭展示（`paused_by_developer`）后：**仍允许**调用开放 API 和上报（HTTP 200），但 **recommend / list 不下发列表**，根上返回 `hidden: true`、`items: []`。这是「自己隐藏互推」，不是错误码。仅运营暂停时封禁开放 API（403）。关闭展示后自己也不出现在别人列表里。
+开发者关闭展示（`paused_by_developer`）后：**仍允许**调用开放 API 和上报（HTTP 200），但 **info 返回 `hidden: true`，recommend / list 不下发列表**（`hidden: true`、`items: []`），详情返回 `{ hidden: true }`。这是「自己隐藏互推」，不是错误码。仅运营暂停时封禁开放 API（403）。关闭展示后自己也不出现在别人列表里。
 
 响应形状：
 
@@ -321,7 +325,21 @@ stateDiagram-v2
 { "error": { "code": "unauthorized", "message": "Invalid API key" } }
 ```
 
-### 6.2 `GET /v1/apps/recommend`
+### 6.2 `GET /v1/info`
+
+Query：`app_id` 必填。不需要 `platform`。
+
+返回联盟对外品牌 + 当前宿主是否展示：
+
+```json
+{ "name": "应用互推联盟", "subtitle": "发现更多好用的 App", "logo_url": "/media/icons/union-logo.png", "hidden": false }
+```
+
+`name` / `subtitle` / `logo_url` 来自 `platform_config`，所有宿主相同。`logo_url` 未上传时为空字符串。`hidden` 对应宿主 `paused_by_developer`。审核中同样返回品牌字段；运营暂停仍 403。
+
+客户端先调本接口：`hidden: true` 时不渲染互推入口。
+
+### 6.3 `GET /v1/apps/recommend`
 
 Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios` / `harmonyos`）；`limit` 默认 10，最小 1，最大 10。
 
@@ -335,7 +353,7 @@ Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios`
 2. 读 Redis `pool:{platform}`（TTL = `recommend_cache_seconds`）。没有则从 DB 拉 `id WHERE in_recommend_pool AND 存在该端 app_platforms`，写入 Redis。
 3. 从列表去掉宿主自己。
 4. Fisher–Yates 洗牌，取 `limit` 条。池更小则全返回。
-5. 用 ID 批量查 App 展示字段（可再加一层 30s 的详情缓存）。
+5. 用 ID 批量查卡片字段（`id, name, icon_url, tagline`）。
 6. 写一条「最近下发」记录到 Redis：`recent:{host_app_id}` = 本次 ID 列表，TTL 24h，供点击校验（见 8.3）。V1 只保留最近 3 次请求的并集，避免「换一批」后旧点击全部失效。
 
 同一响应内 ID 不重复。不保证跨请求不重复。
@@ -344,7 +362,7 @@ Query：`app_id` 必填（宿主 UUID）；`platform` 必填（`android` / `ios`
 
 V1 池子最多几百个 ID，洗牌在内存做。不要 `ORDER BY random()` 全表扫。
 
-### 6.3 `GET /v1/apps`
+### 6.4 `GET /v1/apps`
 
 Query：`app_id` 必填（宿主 UUID）；`platform` 必填；`page` 从 1，`page_size` 默认 20，最大 50。
 
@@ -352,26 +370,34 @@ Query：`app_id` 必填（宿主 UUID）；`platform` 必填；`page` 从 1，`p
 
 排序：`created_at DESC, id DESC`（稳定分页）。V1 无分类筛选。
 
-响应：`{ hidden, items, page, page_size, total }`。开发者关闭展示时 `{ hidden: true, items: [], page, page_size, total: 0 }`。审核中且未自隐藏同样返回 mock，并带 `hidden: false, mock: true`。
+响应：`{ hidden, items, page, page_size, total }`。开发者关闭展示时 `{ hidden: true, items: [], page, page_size, total: 0 }`。审核中且未自隐藏同样返回 mock，并带 `hidden: false, mock: true`。接入文档约定客户端不要用本接口做全量页。
 
-### 6.4 展示字段（recommend 与 list 共用）
+### 6.5 `GET /v1/apps/:id`
+
+Query：`app_id` 必填；`platform` 必填。路径参数是列表里的目标应用 UUID。
+
+- 宿主自隐藏：`{ "hidden": true }`，不下发详情。
+- 可见：`{ "hidden": false, "item": { ...详情字段 } }`；pending 宿主对 mock id 额外带 `mock: true`。
+- 目标不可见 / 非同端 / 自己：404 `target_not_found`。
+
+### 6.6 展示字段
+
+列表卡片（recommend / list 的 `items`）：
 
 ```json
 {
   "id": "uuid",
   "name": "...",
   "icon_url": "https://...",
-  "tagline": "...",
-  "category": "工具",
-  "subcategory": "文件管理",
-  "platform": "android",
-  "package_name": "com.company.app"
+  "tagline": "..."
 }
 ```
 
+详情 `item` 在卡片基础上增加 `description, category, subcategory, platform, package_name, supported_platforms, downloads`。
+
 不要返回开发者邮箱、审核状态、是否在池中、统计数字。
 
-### 6.5 `POST /v1/events/impressions`
+### 6.7 `POST /v1/events/impressions`
 
 Query：`app_id` 必填（宿主 UUID）。
 
@@ -412,7 +438,7 @@ Query：`app_id` 必填（宿主 UUID）。
 
 整请求超限：429。已进入处理的部分条数以限流中间件为准——更简单的做法是：**先限流再处理**，超限整包拒绝，避免半成功。
 
-### 6.6 `POST /v1/events/clicks`
+### 6.8 `POST /v1/events/clicks`
 
 Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目标应用。
 
@@ -536,10 +562,13 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 | PATCH | `/dashboard/apps/:id` | 改名称/描述/分类。已通过的资料变更是否重新进审核：见 D3 |
 | PUT | `/dashboard/apps/:id/platforms` | 覆盖该 App 的端与包名。`{ platforms: [{ platform, packageName }] }` |
 | POST | `/dashboard/apps/:id/resubmit` | 拒绝后重提，`review_status → pending`，清 `rejected_reason` |
-| POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表；宿主 recommend 返回 `hidden: true`、空列表 |
+| POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表；宿主 info / recommend 返回 `hidden: true`，recommend 空列表 |
 | POST | `/dashboard/apps/:id/resume` | 仅当 `paused_by_ops = false` |
 | POST | `/dashboard/apps/:id/api-key/rotate` | 旧 key 立刻 `revoked_at`，新明文只回一次 |
 | POST | `/dashboard/apps/:id/icon` | multipart，校验 mime 为 png/jpeg/webp，最大 512KB，上传对象存储 |
+| GET | `/dashboard/apps/:id/preview/info` | 对齐开放 `GET /v1/info` |
+| GET | `/dashboard/apps/:id/preview/recommend` | 对齐开放 recommend |
+| GET | `/dashboard/apps/:id/preview/detail` | query `platform` + `target_id`，对齐开放详情 |
 | GET | `/dashboard/apps/:id/stats` | query `range=7d\|30d` |
 
 **stats 响应**
@@ -580,8 +609,9 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 | POST | `/admin/apps/:id/pause` | `paused_by_ops`，reason 必填 |
 | POST | `/admin/apps/:id/resume` | |
 | GET | `/admin/anomalies` | 异常 CTR 列表 |
-| GET | `/admin/config` | 读门槛参数 |
-| PATCH | `/admin/config` | 改门槛；改完立刻触发一次全量池重算 |
+| GET | `/admin/config` | 读门槛参数与对外品牌 |
+| PATCH | `/admin/config` | 改门槛或品牌文案；仅观察天数/互惠门槛实际变化时才全量重算池 |
+| POST | `/admin/config/logo` | multipart 上传联盟 logo |
 | GET | `/admin/categories` | 分类树（含应用占用数） |
 | POST | `/admin/categories` | `{ name, parentId? }` 新增大类或小类 |
 | PATCH | `/admin/categories/:id` | 改名，并同步已有应用上的名称 |
@@ -644,7 +674,7 @@ CTR：`impressions_received == 0` 时返回 `null`，不要算成 0 造成误解
 1. 推荐：只出同端、不含自己、不含暂停、不含观察期后未达标。
 2. 推荐：同一响应无重复；limit 上限 10。
 3. 全量列表：观察期未达标的 App 仍出现；开发者关闭展示的不出现。
-4. 宿主关闭展示：`GET /v1/apps/recommend` 与 `GET /v1/apps` 仍 200，根上 `hidden: true`、`items` 为空，且不带 `mock`。
+4. 宿主关闭展示：`GET /v1/info`、`GET /v1/apps/recommend` 与 `GET /v1/apps` 仍 200，`hidden: true`；recommend/list 的 `items` 为空且不带 `mock`；详情 `{ hidden: true }`。
 5. 曝光：自推、跨端、未过审目标 → accepted false。
 6. 曝光：同一 idempotency_key 只计 1 次。
 7. 曝光：同一 client+target 在去重窗内第 2 次不计。
@@ -682,7 +712,7 @@ packages/shared   Zod 类型、分类枚举、错误码
 | D1 | 上报是否强制 `client_id` | **强制**。否则无法按用户去重曝光 | 不收 client_id，只做幂等 + 整 App 限流，统计会偏粗 |
 | D2 | 注册是否验证邮箱 | V1 **不验证**，尽快接入 | 接入 Resend/SES 后再加 |
 | D3 | 已通过 App 改名称/图标/包名 | **不自动打回待审**，运营抽查 | 改关键字段则回到 pending，更安全更烦 |
-| D4 | 开发者关闭展示后开放 API | **仍 200**，但 recommend/list **不下发列表**，返回 `hidden: true`。曝光/点击仍可用。 | 一并 403 封禁，更狠但影响接入调试 |
+| D4 | 开发者关闭展示后开放 API | **仍 200**，info/recommend/list/detail **带 `hidden: true`**，recommend/list 不下发列表。曝光/点击仍可用。 | 一并 403 封禁，更狠但影响接入调试 |
 | D5 | 运营暂停后开放 API | **不可用** | 仍可用，只是自己不出现在别人列表 |
 | D6 | 点击必须命中 recent 下发列表 | **是** | 只要同端可见即可，实现简单但更好刷 |
 

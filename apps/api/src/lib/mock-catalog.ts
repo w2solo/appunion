@@ -1,6 +1,8 @@
 import {
   buildDownloads,
+  listingCardOf,
   type ExtraDownload,
+  type ListingCard,
   type ListingItem,
   type Platform,
 } from "@appunions/shared";
@@ -234,15 +236,20 @@ function listingOf(app: MockApp, platform: Platform): ListingItem {
   };
 }
 
-export function mockRecommend(platform: Platform, limit: number): MockListing[] {
-  return pickRandom([...MOCK_APPS], limit).map((app) => listingOf(app, platform));
+export function mockRecommend(platform: Platform, limit: number): ListingCard[] {
+  return pickRandom([...MOCK_APPS], limit).map((app) => listingCardOf(listingOf(app, platform)));
 }
 
 export function mockList(platform: Platform, page: number, pageSize: number) {
   const total = MOCK_APPS.length;
   const start = Math.max(0, (page - 1) * pageSize);
-  const items = MOCK_APPS.slice(start, start + pageSize).map((app) => listingOf(app, platform));
+  const items = MOCK_APPS.slice(start, start + pageSize).map((app) => listingCardOf(listingOf(app, platform)));
   return { items, page, page_size: pageSize, total };
+}
+
+export function mockDetail(id: string, platform: Platform): ListingItem | null {
+  const app = MOCK_APPS.find((item) => item.id === id);
+  return app ? listingOf(app, platform) : null;
 }
 
 function escapeXml(value: string): string {

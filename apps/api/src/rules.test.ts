@@ -7,19 +7,22 @@ import {
   isValidCategoryName,
   isValidHttpsUrl,
   isValidPackageName,
+  listingCardOf,
   normalizeCategoryName,
   parseDownloadStores,
   parseExtraDownloads,
 } from "@appunions/shared";
 import {
+  hiddenDetailResponse,
   hiddenListResponse,
   hiddenRecommendResponse,
   isSelfHidden,
+  unionInfoResponse,
   visibleRecommendResponse,
 } from "./lib/catalog.js";
 import { pickRandom } from "./lib/random.js";
 import { hashApiKey, generateApiKey } from "./lib/api-keys.js";
-import { isMockAppId, MOCK_APPS, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
+import { isMockAppId, MOCK_APPS, mockDetail, mockIconSvg, mockList, mockRecommend } from "./lib/mock-catalog.js";
 import { parsePlatformsPayload } from "./lib/platform-params.js";
 
 describe("recommend pool eligibility", () => {
@@ -78,6 +81,23 @@ describe("self-hidden listing responses", () => {
     assert.equal(list.page, 1);
     assert.equal(list.page_size, 20);
     assert.deepEqual(list.items, []);
+
+    const detail = hiddenDetailResponse();
+    assert.equal(detail.hidden, true);
+    assert.equal("item" in detail, false);
+  });
+
+  it("builds union info from config and hidden flag", () => {
+    const info = unionInfoResponse(
+      { unionName: "应用互推联盟", unionSubtitle: "发现更多好用的 App", unionLogoUrl: "/media/icons/union-logo.png" },
+      true,
+    );
+    assert.deepEqual(info, {
+      name: "应用互推联盟",
+      subtitle: "发现更多好用的 App",
+      logo_url: "/media/icons/union-logo.png",
+      hidden: true,
+    });
   });
 
   it("keeps mock lists visible with hidden false", () => {
@@ -154,12 +174,9 @@ describe("mock catalog", () => {
     const items = mockRecommend("android", 10);
     assert.equal(items.length, 10);
     assert.equal(new Set(items.map((item) => item.id)).size, 10);
-    assert.ok(items.every((item) => item.platform === "android"));
-    assert.ok(items.every((item) => item.package_name.startsWith("com.appunions.mock.")));
-    assert.ok(items.every((item) => item.description.length > 0));
-    assert.ok(items.every((item) => item.supported_platforms.includes("android")));
-    assert.ok(items.every((item) => item.downloads.length > 0));
-    assert.ok(items.every((item) => item.downloads.every((d) => d.label.length > 0)));
+    assert.ok(items.every((item) => item.icon_url.length > 0));
+    assert.ok(items.every((item) => !("description" in item)));
+    assert.ok(items.every((item) => !("downloads" in item)));
   });
 
   it("recommend does not exceed pool size", () => {
@@ -176,8 +193,25 @@ describe("mock catalog", () => {
     assert.equal(page2.items.length, 6);
     assert.equal(page1.items[0]?.id, MOCK_APPS[0]?.id);
     assert.equal(page2.items[0]?.id, MOCK_APPS[10]?.id);
-    assert.ok(page1.items.every((item) => item.platform === "harmonyos"));
-    assert.ok(page1.items.every((item) => item.downloads.some((d) => d.kind === "store" && d.label === "鸿蒙应用市场")));
+    assert.ok(page1.items.every((item) => !("downloads" in item)));
+  });
+
+  it("detail keeps full listing fields for a mock id", () => {
+    const card = mockRecommend("android", 1)[0];
+    assert.ok(card);
+    const item = mockDetail(card.id, "android");
+    assert.ok(item);
+    assert.equal(item.platform, "android");
+    assert.ok(item.package_name.startsWith("com.appunions.mock."));
+    assert.ok(item.description.length > 0);
+    assert.ok(item.supported_platforms.includes("android"));
+    assert.ok(item.downloads.length > 0);
+    assert.deepEqual(listingCardOf(item), {
+      id: item.id,
+      name: item.name,
+      icon_url: item.icon_url,
+      tagline: item.tagline,
+    });
   });
 
   it("serves svg icons only for mock ids", () => {

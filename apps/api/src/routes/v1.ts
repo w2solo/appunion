@@ -24,16 +24,20 @@ import { readJson, type AppEnv } from "../context.js";
 import type { Env } from "../env.js";
 import { sendError } from "../errors.js";
 import {
+  appDetail,
+  hiddenDetailResponse,
   hiddenListResponse,
   hiddenRecommendResponse,
   hostHasPlatform,
   isSelfHidden,
   listItems,
   recommendItems,
+  unionInfoResponse,
+  visibleDetailResponse,
   visibleListResponse,
   visibleRecommendResponse,
 } from "../lib/catalog.js";
-import { isMockAppId, mockList, mockRecommend } from "../lib/mock-catalog.js";
+import { isMockAppId, mockDetail, mockList, mockRecommend } from "../lib/mock-catalog.js";
 import { impressionDedupSet, rateLimit, recentUnion, rememberRecent } from "../kv.js";
 import { bumpStats } from "../lib/stats.js";
 
@@ -99,6 +103,17 @@ export function v1Routes(app: Hono<AppEnv>) {
       allowHeaders: ["Content-Type"],
     }),
   );
+
+  app.get("/v1/info", async (c) => {
+    const host = await hostFromAppId(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
+    const config = await getConfig(db);
+    if (!(await rateLimit(c.env.KV, `info:${host.id}`, config.rateInfoPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
+    }
+    return c.json(unionInfoResponse(config, isSelfHidden(host)));
+  });
 
   app.get("/v1/apps/recommend", async (c) => {
     const host = await hostFromAppId(c);
@@ -169,6 +184,35 @@ export function v1Routes(app: Hono<AppEnv>) {
       data.items.map((i) => i.id),
     );
     return c.json(visibleListResponse(data));
+  });
+
+  app.get("/v1/apps/:id", async (c) => {
+    const host = await hostFromAppId(c);
+    if (!isHost(host)) return sendError(c, host.status, host.code, host.message);
+    const db = getDb(c.env.DB);
+    const id = z.string().uuid().safeParse(c.req.param("id"));
+    const q = z.object({ platform: z.enum(PLATFORMS) }).safeParse(c.req.query());
+    if (!id.success || !q.success) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "请指定 platform，应用 id 无效");
+    }
+    if (!(await hostHasPlatform(db, host.id, q.data.platform))) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "宿主未配置该端");
+    }
+    const config = await getConfig(db);
+    if (!(await rateLimit(c.env.KV, `detail:${host.id}`, config.rateListPerMin))) {
+      return sendError(c, 429, ERROR_CODES.rate_limited, "Rate limited");
+    }
+    if (isSelfHidden(host)) {
+      return c.json(hiddenDetailResponse());
+    }
+    if (host.reviewStatus === "pending") {
+      const item = mockDetail(id.data, q.data.platform);
+      if (!item) return sendError(c, 404, ERROR_CODES.target_not_found, "应用不存在");
+      return c.json(visibleDetailResponse(item, true));
+    }
+    const item = await appDetail(db, host.id, id.data, q.data.platform);
+    if (!item) return sendError(c, 404, ERROR_CODES.target_not_found, "应用不存在");
+    return c.json(visibleDetailResponse(item));
   });
 
   app.post("/v1/events/impressions", async (c) => {

@@ -272,6 +272,8 @@ export function OpsAnomaliesPage() {
 export function OpsConfigPage() {
   const [cfg, setCfg] = useState<OpsConfig | null>(null);
   const save = useActionFeedback();
+  const brand = useActionFeedback();
+  const logo = useActionFeedback();
 
   useEffect(() => {
     api<OpsConfig>("/admin/config").then(setCfg);
@@ -279,7 +281,7 @@ export function OpsConfigPage() {
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!confirm("会立刻重算推荐池，确定保存？")) return;
+    if (!confirm("观察天数或互惠门槛若有改动，会立刻重算推荐池。确定保存？")) return;
     const fd = new FormData(e.currentTarget);
     const body: Record<string, number> = {};
     for (const [k, v] of fd.entries()) body[k] = Number(v);
@@ -289,7 +291,32 @@ export function OpsConfigPage() {
         body: JSON.stringify(body),
       });
       setCfg(updated);
-    }, "已保存并重算推荐池");
+    }, "已保存");
+  }
+
+  async function onBrandSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    await brand.run(async () => {
+      const updated = await api<OpsConfig>("/admin/config", {
+        method: "PATCH",
+        body: JSON.stringify({
+          unionName: String(fd.get("unionName") ?? "").trim(),
+          unionSubtitle: String(fd.get("unionSubtitle") ?? "").trim(),
+        }),
+      });
+      setCfg(updated);
+    }, "已保存对外展示");
+  }
+
+  async function onLogoChange(file: File | undefined) {
+    if (!file) return;
+    const data = new FormData();
+    data.set("logo", file);
+    await logo.run(async () => {
+      const updated = await api<OpsConfig>("/admin/config/logo", { method: "POST", body: data });
+      setCfg(updated);
+    }, "已更新 logo");
   }
 
   if (!cfg) return <p className="text-muted">加载中…</p>;
@@ -301,6 +328,7 @@ export function OpsConfigPage() {
     ["recommendCacheSeconds", "推荐池缓存秒"],
     ["rateRecommendPerMin", "recommend 每分钟"],
     ["rateListPerMin", "list 每分钟"],
+    ["rateInfoPerMin", "info 每分钟"],
     ["rateImpressionsPerMin", "曝光每分钟条数"],
     ["rateClicksPerMin", "点击每分钟"],
   ];
@@ -315,6 +343,57 @@ export function OpsConfigPage() {
           {cfg.superAdminEmail || "未配置"}
         </p>
       </section>
+      <form className="space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onBrandSubmit(e)}>
+        <h2 className="font-medium">对外展示</h2>
+        <p className="text-sm text-muted">客户端通过 GET /v1/info 拿到名称、宣传语和 logo，用来画互推入口。</p>
+        <label className="block text-sm">
+          对外名称
+          <input
+            className="mt-1 w-full rounded border border-line px-3 py-2"
+            defaultValue={cfg.unionName}
+            key={`name-${cfg.unionName}`}
+            name="unionName"
+            required
+          />
+        </label>
+        <label className="block text-sm">
+          宣传语
+          <input
+            className="mt-1 w-full rounded border border-line px-3 py-2"
+            defaultValue={cfg.unionSubtitle}
+            key={`subtitle-${cfg.unionSubtitle}`}
+            name="unionSubtitle"
+            required
+          />
+        </label>
+        <div className="text-sm">
+          品牌 logo（png/jpeg/webp，≤512KB）
+          <div className="mt-2 flex items-center gap-3">
+            {cfg.unionLogoUrl ? (
+              <img src={cfg.unionLogoUrl} alt="" className="h-12 w-12 rounded object-cover" />
+            ) : (
+              <div className="flex h-12 w-12 items-center justify-center rounded bg-slate-100 text-xs text-muted">
+                未上传
+              </div>
+            )}
+            <input
+              accept="image/png,image/jpeg,image/webp"
+              className="block text-sm"
+              type="file"
+              onChange={(e) => void onLogoChange(e.target.files?.[0])}
+            />
+          </div>
+          <div className="mt-1">
+            <ActionStatus error={logo.error} message={logo.message} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="rounded bg-brand px-4 py-2 text-white disabled:opacity-50" disabled={brand.busy} type="submit">
+            {brand.busy ? "保存中…" : "保存文案"}
+          </button>
+          <ActionStatus error={brand.error} message={brand.message} />
+        </div>
+      </form>
       <form className="space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onSubmit(e)}>
         <h2 className="font-medium">门槛参数</h2>
         {fields.map(([k, label]) => (
@@ -462,12 +541,19 @@ type OpsConfig = {
   recommendCacheSeconds: number;
   rateRecommendPerMin: number;
   rateListPerMin: number;
+  rateInfoPerMin: number;
   rateImpressionsPerMin: number;
   rateClicksPerMin: number;
+  unionName: string;
+  unionSubtitle: string;
+  unionLogoUrl: string;
   superAdminEmail: string;
 };
 
-type NumericConfigKey = Exclude<keyof OpsConfig, "superAdminEmail">;
+type NumericConfigKey = Exclude<
+  keyof OpsConfig,
+  "superAdminEmail" | "unionName" | "unionSubtitle" | "unionLogoUrl"
+>;
 
 type CategoryNode = { id: string; name: string; appCount: number; children: { id: string; name: string; appCount: number }[] };
 

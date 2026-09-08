@@ -255,7 +255,8 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
           <>
             <p className="mt-1 text-sm text-muted">
               关闭后两件事同时发生：本应用不会出现在别人的互推列表里；你请求{" "}
-              <code>GET /v1/apps/recommend</code> 会返回 <code>hidden: true</code> 且没有列表。客户端应隐藏互推入口。这是「自己隐藏互推」的接口约定。
+              <code>GET /v1/info</code> 与 <code>GET /v1/apps/recommend</code> 都会返回{" "}
+              <code>hidden: true</code>，recommend 没有列表。客户端应隐藏互推入口。这是「自己隐藏互推」的接口约定。
             </p>
             {app.pausedByDeveloper ? (
               <button
@@ -551,7 +552,7 @@ function StatusBar({ app }: { app: AppDetail }) {
   } else if (app.pausedByOps) {
     text = "运营已暂停本应用，开放接口不可用。";
   } else if (app.pausedByDeveloper) {
-    text = "已隐藏互推：别人看不到你，你请求接口也不会拿到列表。";
+    text = "已隐藏互推：别人看不到你，info 与 recommend 都会返回 hidden，你也拿不到列表。";
   } else if (app.graceDaysLeft > 0) {
     text = `观察期还剩 ${app.graceDaysLeft} 天。请尽快在 App 里真实展示列表并上报曝光，否则到期会暂时离开推荐池。`;
   } else if (!app.inRecommendPool) {

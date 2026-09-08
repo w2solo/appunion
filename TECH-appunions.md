@@ -247,7 +247,7 @@ flowchart TD
 - 拒绝：红条 + `rejected_reason` + 按钮「修改并重新提交」。
 - 通过 + 观察期：「观察期还剩 N 天。请尽快在 App 里真实展示列表并上报曝光，否则到期会暂时离开推荐池。」
 - 通过 + 缺口：「还差 N 次有效曝光才能回到推荐池。全量列表里别人仍可能看到你。」
-- 开发者关闭展示：「已隐藏互推：别人看不到你，你请求接口也不会拿到列表。」
+- 开发者关闭展示：「已隐藏互推：别人看不到你，info 与 recommend 都会返回 hidden，你也拿不到列表。」
 - 运营暂停：「运营已暂停本应用，开放接口不可用。」
 
 **资料**
@@ -261,11 +261,11 @@ flowchart TD
 **凭证**
 
 - `app_id` 可复制，写在接入页。客户端请求 `/v1` 时带查询参数 `app_id`。
-- 示例：`GET /v1/apps/recommend?app_id=<uuid>&platform=android`。接入页「点击测试」用同一接口拉列表，弹窗标明 mock 或真实数据。
+- 示例：`GET /v1/info?app_id=<uuid>`，再 `GET /v1/apps/recommend?app_id=<uuid>&platform=android`。接入页「点击测试」先打 info 再拉列表，点行再拉详情；弹窗标明 mock 或真实数据。
 
 **配置（展示开关 + 列表面板条数）**
 
-- 展示开关在配置页，即时 pause / resume。关闭后自己不出现在别人列表，且宿主 recommend 返回 `hidden: true`、空列表。运营暂停时禁用恢复，提示联系运营。
+- 展示开关在配置页，即时 pause / resume。关闭后自己不出现在别人列表，且宿主 info / recommend 返回 `hidden: true`、recommend 空列表。运营暂停时禁用恢复，提示联系运营。
 
 接口：`GET /dashboard/apps/:id`、`PATCH`、`PUT .../platforms`、`resubmit`、`pause`、`resume`、`api-key/rotate`、`icon`。
 
@@ -287,7 +287,7 @@ flowchart TD
 必须有四章（对应 PRD 支柱 C）：
 
 1. **接入步骤**：注册 → 建 App → 填各端包名 → 等审核 → 拿 key → 带 `platform` 拉推荐 → 可视区报曝光 → 点击后上报再用 `package_name` 打开商店。
-2. **API**：Base URL、鉴权、四个接口的请求/响应/错误码。从 `packages/shared` 生成或手写，但要和实现一致。
+2. **API**：Base URL、鉴权、info / recommend / 详情 / 曝光 / 点击的请求/响应/错误码。从 `packages/shared` 生成或手写，但要和实现一致。
 3. **规则**：同端、排除自己、观察期 7 天、近 7 天 100 次贡献曝光、开发者自隐藏互推（`hidden: true`）vs 运营暂停。
 4. **样式参考**：卡片 = 图标 + 名称 + 一句话 + 按钮；「换一批」打 recommend；「查看全部」打分页全量。标明「不是强制组件，但曝光点击必须报」。给一张线框示意（静态图即可）。
 
@@ -312,9 +312,9 @@ flowchart TD
 ### 7.10 运营：异常 `/ops/anomalies`、参数 `/ops/config`
 
 - 异常：App、类型、窗口、时间。操作可跳到该 App 审核详情去暂停。
-- 参数：观察天数、互惠曝光阈值、去重分钟、各限流。保存前二次确认「会立刻重算推荐池」。普通管理员可以改这些门槛。
+- 参数：对外名称、宣传语、品牌 logo；观察天数、互惠曝光阈值、去重分钟、各限流。门槛数字保存前二次确认。改品牌文案或 logo 不重算推荐池。普通管理员可以改这些。
 
-接口：`GET/PATCH /admin/config`，`GET /admin/anomalies`。
+接口：`GET/PATCH /admin/config`，`POST /admin/config/logo`，`GET /admin/anomalies`。
 
 ### 7.11 运营：管理员 `/ops/admins`
 

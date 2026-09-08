@@ -3,17 +3,25 @@ import {
   IMPRESSION_BATCH_MAX,
   PLATFORM_LABELS,
   PLATFORMS,
+  type ListingCard,
   type ListingItem,
   type Platform,
+  type UnionInfo,
 } from "@appunions/shared";
 import { api } from "../shared/api";
 import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
-import { RecommendListPanel } from "../shared/recommend-list-panel";
+import { RecommendListPanel, type RecommendPanelItem } from "../shared/recommend-list-panel";
 
 type RecommendResponse = {
-  items: ListingItem[];
+  items: ListingCard[];
   mock?: boolean;
   hidden: boolean;
+};
+
+type DetailResponse = {
+  hidden: boolean;
+  mock?: boolean;
+  item?: ListingItem;
 };
 
 export function AppIntegratePanel({
@@ -31,6 +39,7 @@ export function AppIntegratePanel({
 }) {
   const [platform, setPlatform] = useState<Platform>(platforms[0]?.platform ?? "android");
   const [open, setOpen] = useState(false);
+  const [info, setInfo] = useState<UnionInfo | null>(null);
   const [result, setResult] = useState<RecommendResponse | null>(null);
   const copyPrompt = useActionFeedback();
   const copyCurl = useActionFeedback();
@@ -44,11 +53,14 @@ export function AppIntegratePanel({
   }, [platforms, platform]);
 
   const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const infoPath = `/v1/info?app_id=${appId}`;
   const v1Path = `/v1/apps/recommend?app_id=${appId}&platform=${platform}`;
-  const curl = `curl -s '${origin}${v1Path}'`;
+  const curl = `curl -s '${origin}${infoPath}'\ncurl -s '${origin}${v1Path}'`;
 
   async function run(openModal: boolean) {
     await send.run(async () => {
+      const nextInfo = await api<UnionInfo>(infoPath);
+      setInfo(nextInfo);
       const data = await api<RecommendResponse>(v1Path);
       setResult(data);
       if (openModal) setOpen(true);
@@ -62,7 +74,7 @@ export function AppIntegratePanel({
     listSize,
     origin,
     hidden,
-    sample: result,
+    sample: { info, recommend: result },
   });
 
   return (
@@ -88,11 +100,19 @@ export function AppIntegratePanel({
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">交互规范</h2>
         <p className="mt-1 text-sm text-muted">
-          只做一块内嵌列表面板，不要做「查看全部」或全量列表页。按系统原生分组列表来画，并按你 App 的字体和主色微调。
+          只做一块内嵌列表面板，不要做「查看全部」或全量列表页。面板标题、副标题和 logo 用{" "}
+          <code>GET /v1/info</code> 的返回值，不要写死。按系统原生分组列表来画，并按你 App 的字体和主色微调。
         </p>
         <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-7">
+          <li>
+            先调 <code>GET /v1/info</code>。若 <code>hidden: true</code>，不要渲染互推入口。否则用返回的{" "}
+            <code>name</code> / <code>subtitle</code> / <code>logo_url</code> 画面板头。
+          </li>
           <li>列表每行：圆角图标、名称、简介（<code>tagline</code>）、右侧「查看」。</li>
-          <li>用户点整行后弹出应用详情：图标、名称、简介、更多描述（<code>description</code>）、支持的平台、下载渠道。</li>
+          <li>
+            用户点整行后再调 <code>GET /v1/apps/:id</code> 弹出详情：图标、名称、简介、更多描述（
+            <code>description</code>）、支持的平台、下载渠道。
+          </li>
           <li>
             Android：勾选的应用商店由服务端用 <code>package_name</code> 按各店 schema 拼好 <code>downloads[].url</code>，额外最多一条 https。点按钮直接打开返回的 <code>url</code>，不要自己拼商店地址。
           </li>
@@ -105,11 +125,12 @@ export function AppIntegratePanel({
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">请求与测试</h2>
         <p className="mt-1 text-sm text-muted">
-          条数以「配置」为准（当前 {listSize} 条）。根上始终有 <code>hidden</code>。审核中返回 mock（根上 <code>mock: true</code>），不计曝光；通过后自动变为真实推荐。
+          条数以「配置」为准（当前 {listSize} 条）。先打 <code>/v1/info</code> 看 <code>hidden</code>
+          ，再拉 recommend。审核中返回 mock（根上 <code>mock: true</code>），不计曝光；通过后自动变为真实推荐。
         </p>
         {hidden && (
           <p className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
-            当前展示开关已关闭。点击测试会返回 <code>hidden: true</code> 且没有列表——这是「自己隐藏互推」接口。去「配置」打开展示后才能测真实列表。
+            当前展示开关已关闭。点击测试会先返回 info 的 <code>hidden: true</code>，recommend 也是空列表——这是「自己隐藏互推」接口。去「配置」打开展示后才能测真实列表。
           </p>
         )}
         {platforms.length === 0 && (
@@ -182,20 +203,24 @@ POST /v1/events/clicks?app_id=${appId}
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">接口字段</h2>
         <p className="mt-1 text-sm text-muted">
-          <code>GET /v1/apps/recommend?app_id=…&amp;platform={platform}</code> 根上始终包含{" "}
-          <code>hidden</code> 和 <code>items</code>。
+          客户端按 <code>info</code> → <code>recommend</code> → 点行再拉 <code>/v1/apps/:id</code> 接入。
         </p>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6">
           <li>
-            <code>hidden</code>：对应配置里的展示开关。为 <code>true</code> 时表示开发者关闭了展示，
-            <strong>这是自己隐藏互推的接口</strong>：<code>items</code> 为空，客户端应隐藏列表面板，不要当成推荐池为空去轮询。
+            <code>GET /v1/info</code>：<code>name</code>、<code>subtitle</code>、<code>logo_url</code>{" "}
+            是联盟全局品牌（管理员配置）；<code>hidden</code> 对应本应用展示开关。
           </li>
           <li>
-            列表每条包含{" "}
-            <code>id, name, icon_url, tagline, description, category, subcategory, platform, package_name</code>
+            <code>hidden</code> 为 <code>true</code> 时，info 与 recommend 都表示开发者关闭了展示，
+            <strong>这是自己隐藏互推的接口</strong>：recommend 的 <code>items</code> 为空，客户端应隐藏列表面板，不要当成推荐池为空去轮询。
           </li>
           <li>
-            <code>supported_platforms</code>：该应用已配置的系统端，详情里用来展示「也支持 iOS」等。
+            列表每条只含卡片字段 <code>id, name, icon_url, tagline</code>。
+          </li>
+          <li>
+            详情含{" "}
+            <code>description, category, subcategory, platform, package_name, supported_platforms, downloads</code>
+            。<code>supported_platforms</code> 用来展示「也支持 iOS」等。
           </li>
           <li>
             <code>downloads</code>：当前请求端的下载按钮。Android 商店项的 <code>url</code> 已按包名拼好（如华为{" "}
@@ -216,7 +241,7 @@ POST /v1/events/clicks?app_id=${appId}
           <li>列表面板不含你自己。不要调用 GET /v1/apps 做全量页。</li>
           <li>审核中可用 app_id 拉 mock；上报会 accepted 但不记账。已拒绝才返回 403 app_not_approved。</li>
           <li>审核通过后有观察期（默认 7 天），之后滚动 7 天有效贡献曝光需达门槛（默认 100），否则暂时离开推荐池。</li>
-          <li>开发者关闭展示：自己不出现在别人列表；recommend 仍 200，但 <code>hidden: true</code> 且没有列表。运营暂停：403 app_paused_by_ops，开放接口不可用。</li>
+          <li>开发者关闭展示：自己不出现在别人列表；info 与 recommend 仍 200，但 <code>hidden: true</code>，recommend 没有列表。运营暂停：403 app_paused_by_ops，开放接口不可用。</li>
         </ul>
       </section>
 
@@ -240,7 +265,10 @@ POST /v1/events/clicks?app_id=${appId}
 
       {open && result && (
         <PreviewModal
+          info={info}
           result={result}
+          appId={appId}
+          platform={platform}
           shuffling={send.busy}
           error={send.error}
           onClose={() => setOpen(false)}
@@ -251,20 +279,41 @@ POST /v1/events/clicks?app_id=${appId}
   );
 }
 
+function toPanelItem(item: ListingCard | ListingItem): RecommendPanelItem {
+  const detail = "description" in item ? (item as ListingItem) : null;
+  return {
+    id: item.id,
+    name: item.name,
+    iconUrl: item.icon_url,
+    tagline: item.tagline,
+    description: detail?.description,
+    supportedPlatforms: detail?.supported_platforms,
+    downloads: detail?.downloads,
+    packageName: detail?.package_name,
+    platform: detail?.platform,
+  };
+}
+
 function PreviewModal({
+  info,
   result,
+  appId,
+  platform,
   shuffling,
   error,
   onClose,
   onShuffle,
 }: {
+  info: UnionInfo | null;
   result: RecommendResponse;
+  appId: string;
+  platform: Platform;
   shuffling: boolean;
   error: string;
   onClose: () => void;
   onShuffle: () => void;
 }) {
-  const hidden = result.hidden === true;
+  const hidden = (info?.hidden ?? result.hidden) === true;
   const mock = !hidden && result.mock === true;
 
   useEffect(() => {
@@ -301,34 +350,34 @@ function PreviewModal({
         </div>
         <p className="mt-2 text-xs text-muted">
           {hidden
-            ? "展示开关已关闭。接口返回 hidden: true 且没有列表——这是自己隐藏互推，不是推荐池为空。去「配置」打开展示后才能测真实列表。"
+            ? "展示开关已关闭。info 与 recommend 都返回 hidden: true，recommend 没有列表——这是自己隐藏互推，不是推荐池为空。去「配置」打开展示后才能测真实列表。"
             : mock
               ? "当前应用尚未通过审核，接口返回的是 mock，不计曝光。通过后这里会自动变成真实推荐。"
-              : "当前返回的是真实推荐池。点列表项看详情弹窗，点「换一批」会再随机抽一次。"}
+              : "当前返回的是真实推荐池。点列表项会再拉详情接口，点「换一批」会再随机抽一次。"}
         </p>
         {!hidden && (
           <div className="mx-auto mt-4 max-w-[360px]">
             <RecommendListPanel
-              items={result.items.map((item) => ({
-                id: item.id,
-                name: item.name,
-                iconUrl: item.icon_url,
-                tagline: item.tagline,
-                description: item.description,
-                supportedPlatforms: item.supported_platforms,
-                downloads: item.downloads,
-                packageName: item.package_name,
-                platform: item.platform,
-              }))}
+              branding={
+                info
+                  ? { name: info.name, subtitle: info.subtitle, logoUrl: info.logo_url || undefined }
+                  : undefined
+              }
+              items={result.items.map(toPanelItem)}
               shuffling={shuffling}
               emptyText="暂时没有可展示的应用"
               onShuffle={onShuffle}
+              onLoadDetail={async (id) => {
+                const data = await api<DetailResponse>(`/v1/apps/${id}?app_id=${appId}&platform=${platform}`);
+                if (data.hidden || !data.item) return null;
+                return toPanelItem(data.item);
+              }}
             />
           </div>
         )}
         {hidden && (
           <pre className="mt-4 overflow-auto rounded bg-slate-100 p-3 text-xs">
-            {JSON.stringify(result, null, 2)}
+            {JSON.stringify({ info, recommend: result }, null, 2)}
           </pre>
         )}
         <div className="mt-3">
@@ -338,7 +387,7 @@ function PreviewModal({
           <details className="mt-4">
             <summary className="cursor-pointer text-sm text-muted">返回 JSON</summary>
             <pre className="mt-2 max-h-60 overflow-auto rounded bg-slate-100 p-3 text-xs">
-              {JSON.stringify(result, null, 2)}
+              {JSON.stringify({ info, recommend: result }, null, 2)}
             </pre>
           </details>
         )}
@@ -372,7 +421,7 @@ function buildIntegratePrompt({
     ? `\n## 一份返回示例\n\`\`\`json\n${JSON.stringify(sample, null, 2)}\n\`\`\`\n`
     : "";
   const hiddenNow = hidden
-    ? "当前控制台已关闭展示开关，recommend 会返回 hidden: true、items: []。接入时仍必须处理这个字段；测真实列表请先到配置里打开展示。"
+    ? "当前控制台已关闭展示开关，info 与 recommend 都会返回 hidden: true，recommend 的 items 为 []。接入时仍必须处理这个字段；测真实列表请先到配置里打开展示。"
     : "当前展示开关是打开的。";
 
   return `你是资深移动端工程师。请为「${appName}」接入 AppUnions 应用互推。
@@ -382,9 +431,10 @@ function buildIntegratePrompt({
 
 视觉参考系统原生分组列表（iOS Settings / 类似 inset grouped）：
 - 浅灰底上的白色圆角卡片
-- 标题「发现应用」，右侧「换一批」
+- 面板标题、副标题、logo 必须用 GET /v1/info 返回的 name / subtitle / logo_url，不要写死「发现应用」或本地图标。logo_url 是站点相对路径，展示时拼上 Base URL；为空则不画 logo
+- 右侧「换一批」
 - 每行：圆角图标、名称、一句话简介 tagline、右侧「查看」
-- 点整行打开应用详情弹窗（不要直接跳商店）
+- 点整行再请求详情接口，打开应用详情弹窗（不要直接跳商店）
 - 详情：大图标、名称、简介、更多描述 description、支持的平台徽章、下载按钮列表
 - 行与行之间细分割线
 - 按本 App 现有字体、间距和主色微调，不要做成广告横幅
@@ -393,9 +443,9 @@ function buildIntegratePrompt({
 控制台已把列表条数配成 ${listSize}。GET /v1/apps/recommend 会按这个数量返回，客户端不要再截断、也不要再传更大的 limit。
 
 ## 自己隐藏互推（hidden）
-GET /v1/apps/recommend 根上始终有 hidden: boolean。
-- hidden: false：按 items 渲染列表面板。
-- hidden: true：开发者在控制台关闭了展示开关。这是「自己隐藏互推」接口，不是推荐池为空。items 一定是 []。此时不要渲染互推 UI，不要换一批，不要轮询，也不要报曝光。
+先调 GET /v1/info?app_id=${appId}，根上有 hidden: boolean。
+- hidden: false：再调 recommend，按 items 渲染列表面板。
+- hidden: true：开发者在控制台关闭了展示开关。这是「自己隐藏互推」接口，不是推荐池为空。此时不要渲染互推 UI，不要换一批，不要轮询，也不要报曝光。若仍请求 recommend，也会返回 hidden: true、items: []。
 - 关闭展示后，本应用也不会出现在别人的列表里。
 ${hiddenNow}
 
@@ -408,14 +458,16 @@ ${hiddenNow}
 - 请求时 platform 必须是当前运行端：android / ios / harmonyos
 
 ## 接口
-1. GET /v1/apps/recommend?app_id=${appId}&platform=<当前端>
-   根上返回 hidden 和 items。hidden 为 false 时从推荐池等权随机，返回 ${listSize} 条，不含自己。换一批 = 再请求一次。
-2. POST /v1/events/impressions?app_id=${appId}
+1. GET /v1/info?app_id=${appId}
+   返回 name、subtitle、logo_url（联盟全局品牌）和 hidden（当前应用是否展示）。
+2. GET /v1/apps/recommend?app_id=${appId}&platform=<当前端>
+   根上返回 hidden 和 items。hidden 为 false 时从推荐池等权随机，返回 ${listSize} 条卡片（id, name, icon_url, tagline），不含自己。换一批 = 再请求一次。
+3. GET /v1/apps/<列表里的 id>?app_id=${appId}&platform=<当前端>
+   点行后再拉。返回 { hidden, item }。item 含 description、category、supported_platforms、downloads 等详情字段。宿主 hidden 时为 { hidden: true }，没有 item。
+4. POST /v1/events/impressions?app_id=${appId}
    卡片进入可视区域后再报。visible 必须为 true。单次最多 ${IMPRESSION_BATCH_MAX} 条。hidden 为 true 时不要调用。
-3. POST /v1/events/clicks?app_id=${appId}
+5. POST /v1/events/clicks?app_id=${appId}
    用户在详情里点某个下载按钮后再报，然后跳转。点开详情本身不要报点击。
-
-列表项字段：id, name, icon_url, tagline, description, category, subcategory, platform, package_name, supported_platforms, downloads。
 
 downloads 每条：{ "kind": "store" | "url", "store"?: string, "label": string, "url": string }。
 - Android：同时返回 package_name 和已拼好的 downloads[].url。商店 URL 由服务端用包名按 schema 生成（如华为 appmarket://details?id=<package_name>、系统商店 market://details?id=<package_name>）；额外最多一条 https。客户端直接打开 url，不要自己拼。
@@ -433,6 +485,6 @@ downloads 每条：{ "kind": "store" | "url", "store"?: string, "label": string,
 - 同端互推，未配置的端不要请求
 - 审核中 /v1 返回结构相同的 mock 测试数据（根上可能有 mock: true，hidden 仍为 false），上报会 accepted 但不计曝光；通过后自动变为真实推荐。mock 包名打不开真商店
 - 推荐池有观察期和互惠门槛，以后台显示为准
-- 常见错误：401 unauthorized（app_id 无效）、403 app_not_approved（已拒绝）/ app_paused_by_ops、429 rate_limited。自己隐藏互推不是错误，是 hidden: true 的 200。
+- 常见错误：401 unauthorized（app_id 无效）、403 app_not_approved（已拒绝）/ app_paused_by_ops、429 rate_limited、404 target_not_found。自己隐藏互推不是错误，是 hidden: true 的 200。
 ${sampleBlock}`;
 }

@@ -12,6 +12,9 @@ import { api } from "../shared/api";
 import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
 import { RecommendListPanel, UnionEntryItem, type RecommendPanelItem } from "../shared/recommend-list-panel";
 
+const FLUTTER_SDK_URL = "https://pub.dev/packages/appunion_flutter";
+const FLUTTER_SDK_PRODUCTION_HOST = "appunion.chiyoushu.com";
+
 type RecommendResponse = {
   items: ListingCard[];
   mock?: boolean;
@@ -41,6 +44,7 @@ export function AppIntegratePanel({
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<UnionInfo | null>(null);
   const [result, setResult] = useState<RecommendResponse | null>(null);
+  const [promptKind, setPromptKind] = useState<"flutter" | "native">("flutter");
   const copyPrompt = useActionFeedback();
   const copyCurl = useActionFeedback();
   const copyId = useActionFeedback();
@@ -97,6 +101,7 @@ export function AppIntegratePanel({
       ? { name: info.name, subtitle: info.subtitle, logoUrl: info.logo_url || undefined }
       : null;
 
+  const flutterSdk = buildFlutterSdkGuide({ appId, platforms, origin });
   const prompt = buildIntegratePrompt({
     appId,
     appName,
@@ -106,13 +111,32 @@ export function AppIntegratePanel({
     hidden,
     sample: { info, recommend: result },
   });
+  const flutterPrompt = buildFlutterIntegratePrompt({
+    appId,
+    appName,
+    platforms,
+    origin,
+    hidden,
+    initCode: flutterSdk.initCode,
+    usageCode: flutterSdk.usageCode,
+  });
+  const activePrompt = promptKind === "flutter" ? flutterPrompt : prompt;
 
   return (
     <div className="space-y-6">
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">把互推接到这个 App</h2>
         <p className="mt-1 text-sm text-muted">
-          这篇文档只针对当前应用。原生客户端直接调开放接口，只需 <code>app_id</code>，不需要 API Key，也不需要自建后端。
+          这篇文档只针对当前应用。Flutter 请用官方 SDK{" "}
+          <a
+            className="text-brand underline-offset-2 hover:underline"
+            href={FLUTTER_SDK_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            appunion_flutter
+          </a>
+          ；原生或其它端直接调开放接口。只需 <code>app_id</code>，不需要 API Key，也不需要自建后端。
         </p>
         <p className="mt-4 text-sm">
           app_id：<code className="rounded bg-slate-100 px-1">{appId}</code>
@@ -125,6 +149,55 @@ export function AppIntegratePanel({
           </button>
           {copyId.error && <span className="ml-2 text-red-600">{copyId.error}</span>}
         </p>
+      </section>
+
+      <section className="rounded-lg bg-white p-6 shadow-sm">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-medium">Flutter SDK</h2>
+          <a
+            className="text-sm text-brand underline-offset-2 hover:underline"
+            href={FLUTTER_SDK_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            pub.dev/packages/appunion_flutter
+          </a>
+        </div>
+        <p className="mt-1 text-sm text-muted">
+          Flutter 开发者用这个库接入：自己画入口，点入口后调用 <code>show()</code>
+          ，列表弹窗、详情、曝光和点击上报都由 SDK 完成。不要自己调 <code>/v1</code>。
+        </p>
+        {flutterSdk.warnings.map((text) => (
+          <p
+            key={text}
+            className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            {text}
+          </p>
+        ))}
+        <ol className="mt-4 list-decimal space-y-4 pl-5 text-sm leading-7">
+          <li>
+            安装
+            <CopyableCode className="mt-2" code={flutterSdk.installCode} />
+          </li>
+          <li>
+            启动时初始化，填入当前应用的 <code>app_id</code>
+            <CopyableCode className="mt-2" code={flutterSdk.initCode} />
+          </li>
+          <li>
+            进页 <code>fetchInfo()</code> 决定是否画入口；用户点击后再 <code>show()</code>
+            <CopyableCode className="mt-2" code={flutterSdk.usageCode} />
+          </li>
+        </ol>
+        <ul className="mt-4 list-disc space-y-1 pl-5 text-sm leading-6 text-muted">
+          <li>入口 UI 由你自己画，可用 <code>info.name</code> / <code>subtitle</code> / <code>logoUrl</code>，或 SDK 自带的 <code>AppUnionAssets.entryIcon</code>。</li>
+          <li>目前只支持 Android 和鸿蒙。iOS / 桌面 / Web 上 <code>canShow()</code> 为 false，不会发请求、也不会弹窗。</li>
+          <li>
+            SDK 默认请求 <code>https://appunion.chiyoushu.com</code>
+            。连本环境调试时把 <code>baseUrl</code> 设成当前站点。
+          </li>
+          <li>原生 Android / iOS / 鸿蒙，或其它跨端框架，继续看下面的交互规范和开放接口。</li>
+        </ul>
       </section>
 
       <section className="rounded-lg bg-white p-6 shadow-sm">
@@ -312,20 +385,50 @@ POST /v1/events/clicks?app_id=${appId}
       </section>
 
       <section className="rounded-lg bg-white p-6 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-medium">接入 Prompt</h2>
           <button
             className="rounded bg-brand px-3 py-1.5 text-sm text-white"
             type="button"
-            onClick={() => void copyPrompt.run(() => copyToClipboard(prompt), "已复制")}
+            onClick={() => void copyPrompt.run(() => copyToClipboard(activePrompt), "已复制")}
           >
             {copyPrompt.message ? "已复制" : "复制 Prompt"}
           </button>
         </div>
-        <p className="mt-1 text-sm text-muted">贴给 Cursor / Claude 等：宿主页只放入口 item，点开后用弹窗展示说明、列表和详情。</p>
+        <div className="mt-3 flex gap-1 border-b border-line">
+          <button
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${
+              promptKind === "flutter" ? "border-brand font-medium text-brand" : "border-transparent text-muted"
+            }`}
+            type="button"
+            onClick={() => {
+              setPromptKind("flutter");
+              copyPrompt.reset();
+            }}
+          >
+            Flutter SDK
+          </button>
+          <button
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm ${
+              promptKind === "native" ? "border-brand font-medium text-brand" : "border-transparent text-muted"
+            }`}
+            type="button"
+            onClick={() => {
+              setPromptKind("native");
+              copyPrompt.reset();
+            }}
+          >
+            原生接口
+          </button>
+        </div>
+        <p className="mt-2 text-sm text-muted">
+          {promptKind === "flutter"
+            ? "贴给 Cursor / Claude：用 appunion_flutter 接入，不要自己调开放接口。"
+            : "贴给原生或其它跨端：宿主页只放入口 item，点开后用弹窗展示说明、列表和详情。"}
+        </p>
         <ActionStatus error={copyPrompt.error} />
         <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded bg-slate-100 p-3 text-xs leading-5">
-          {prompt}
+          {activePrompt}
         </pre>
       </section>
 
@@ -497,6 +600,8 @@ function buildIntegratePrompt({
 
   return `你是资深移动端工程师。请为「${appName}」接入 AppUnions 应用互推。
 
+若宿主是 Flutter，不要按本文对接 HTTP，改用官方 SDK：${FLUTTER_SDK_URL}。本文只给原生 Android / iOS / 鸿蒙或其它自行调接口的客户端。
+
 AppUnions 是独立开发者的免费等权交叉推广：接入后展示同平台其他 App，自己也会出现在别人列表里。不是广告 SDK，不要做成 Banner、插屏或信息流广告。宿主页只放一条入口，用户点开后才是发现列表。
 
 ## UI 规范：入口 item + 列表弹窗（禁止内嵌列表）
@@ -571,4 +676,169 @@ downloads 每条：{ "kind": "store" | "url", "store"?: string, "label": string,
 - 推荐池有观察期和互惠门槛，以后台显示为准
 - 常见错误：401 unauthorized（app_id 无效）、403 app_not_approved（已拒绝）/ app_paused_by_ops、429 rate_limited、404 target_not_found。自己隐藏互推不是错误，是 hidden: true 的 200。
 ${sampleBlock}`;
+}
+
+function CopyableCode({ code, className = "" }: { code: string; className?: string }) {
+  const copy = useActionFeedback();
+  return (
+    <div className={className}>
+      <div className="mb-1 flex justify-end text-xs">
+        <button
+          className="text-brand"
+          type="button"
+          onClick={() => void copy.run(() => copyToClipboard(code), "已复制")}
+        >
+          {copy.message ? "已复制" : "复制"}
+        </button>
+      </div>
+      {copy.error && <p className="mb-1 text-xs text-red-600">{copy.error}</p>}
+      <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-slate-100 p-3 text-xs leading-5">{code}</pre>
+    </div>
+  );
+}
+
+function flutterEnabledPlatformLines(platforms: { platform: Platform }[]) {
+  const lines: string[] = [];
+  if (platforms.some((p) => p.platform === "android")) lines.push("AppUnionPlatform.android");
+  if (platforms.some((p) => p.platform === "harmonyos")) lines.push("AppUnionPlatform.harmony");
+  return lines;
+}
+
+function buildFlutterSdkGuide({
+  appId,
+  platforms,
+  origin,
+}: {
+  appId: string;
+  platforms: { platform: Platform; packageName: string }[];
+  origin: string;
+}) {
+  const enabled = flutterEnabledPlatformLines(platforms);
+  const hasIos = platforms.some((p) => p.platform === "ios");
+  const warnings: string[] = [];
+  if (platforms.length === 0) {
+    warnings.push("请先在「基本信息」里配置 Android 或鸿蒙。SDK 目前不支持 iOS。");
+  } else if (enabled.length === 0) {
+    warnings.push("当前只配置了 iOS。Flutter SDK 在 iOS 上不会展示入口，请先加上 Android 或鸿蒙，或按下方开放接口自行接 iOS。");
+  } else if (hasIos) {
+    warnings.push("SDK 目前不支持 iOS。iOS 上不要画入口；若 iOS 也要互推，按下方开放接口自行接入。");
+  }
+
+  const platformLines = (enabled.length > 0 ? enabled : ["AppUnionPlatform.android", "AppUnionPlatform.harmony"]).join(
+    ",\n      ",
+  );
+  const useCustomBaseUrl = Boolean(origin) && !origin.includes(FLUTTER_SDK_PRODUCTION_HOST);
+  const extraConfig = useCustomBaseUrl ? `\n    baseUrl: '${origin}',` : "";
+
+  const installCode = `flutter pub add appunion_flutter`;
+  const initCode = `import 'package:appunion_flutter/appunion_flutter.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppUnion.instance.initialize(const AppUnionConfig(
+    appId: '${appId}',${extraConfig}
+    enabledPlatforms: {
+      ${platformLines},
+    },
+  ));
+  runApp(const MyApp());
+}`;
+  const usageCode = `try {
+  if (AppUnion.instance.isLocallyDisabled) {
+    return;
+  }
+  final info = await AppUnion.instance.fetchInfo();
+  if (info == null || info.hidden) {
+    return;
+  }
+  // 用 info.name、info.subtitle、info.logoUrl 画入口
+} on AppUnionException {
+  // 网络或鉴权失败，藏入口
+}
+
+await AppUnion.instance.show(context, onDisabled: () {
+  // 用户点了「不再显示」，接入方自己摘掉入口
+});`;
+
+  return { installCode, initCode, usageCode, warnings };
+}
+
+function buildFlutterIntegratePrompt({
+  appId,
+  appName,
+  platforms,
+  origin,
+  hidden,
+  initCode,
+  usageCode,
+}: {
+  appId: string;
+  appName: string;
+  platforms: { platform: Platform; packageName: string }[];
+  origin: string;
+  hidden: boolean;
+  initCode: string;
+  usageCode: string;
+}) {
+  const flutterPlatforms = platforms.filter((p) => p.platform === "android" || p.platform === "harmonyos");
+  const platformList =
+    flutterPlatforms.length === 0
+      ? "尚未配置 Android / 鸿蒙，请先在控制台勾选并填写包名"
+      : flutterPlatforms.map((p) => `${PLATFORM_LABELS[p.platform]}（${p.platform}，包名 ${p.packageName}）`).join("、");
+  const hiddenNow = hidden
+    ? "当前控制台已关闭展示开关，fetchInfo() 会得到 hidden: true。接入时仍必须处理这个字段；测真实列表请先到配置里打开展示。"
+    : "当前展示开关是打开的。";
+  const useCustomBaseUrl = Boolean(origin) && !origin.includes(FLUTTER_SDK_PRODUCTION_HOST);
+
+  return `你是资深 Flutter 工程师。请为「${appName}」接入 AppUnions 应用互推。
+
+优先使用官方 Flutter SDK，不要自己调 /v1，不要自己实现曝光/点击上报，不要自己做列表弹窗。
+包地址：${FLUTTER_SDK_URL}
+
+AppUnions 是独立开发者的免费等权交叉推广：接入后展示同平台其他 App，自己也会出现在别人列表里。不是广告 SDK，不要做成 Banner、插屏或信息流广告。
+
+## 安装
+\`\`\`bash
+flutter pub add appunion_flutter
+\`\`\`
+
+## 初始化
+\`\`\`dart
+${initCode}
+\`\`\`
+
+${useCustomBaseUrl ? `当前控制台不在生产域名，初始化里已带上 baseUrl: ${origin}。正式发布可删掉 baseUrl，SDK 默认连 https://${FLUTTER_SDK_PRODUCTION_HOST}。` : `SDK 默认请求 https://${FLUTTER_SDK_PRODUCTION_HOST}，不要改 baseUrl。`}
+
+## 入口（由接入方自己画）
+入口 UI 由接入方自己画。进页调用 fetchInfo()（每次都请求网络，不缓存）：
+\`\`\`dart
+${usageCode}
+\`\`\`
+
+- hidden 或 info == null：不渲染任何互推 UI
+- 否则用 info.name / info.subtitle / info.logoUrl 画一条设置页 cell（左侧 logo、主标题、副标题、右侧 chevron）。入口不要展示 description。
+- logoUrl 可能是站点相对路径，展示时拼上 SDK 的 baseUrl；为空可用 AppUnionAssets.entryIcon（package: AppUnionAssets.package）。
+- 入口本身不要报曝光。
+- 用户点击入口后再调用 AppUnion.instance.show(context)。列表、详情、换一批、曝光、点击、商店跳转全部交给 SDK。
+
+也可以先用 canShow() 做一次快捷判断（平台 + 本地关闭 + hidden），再决定是否画入口。
+
+## 限制
+- 仅支持 Android、鸿蒙。iOS / 桌面 / Web 上 canShow() 为 false，show() / fetchInfo() 不发请求、不展示 UI。不要在这些端画入口。
+- 同端互推：platform 由 SDK 按当前运行端探测（android / harmony），接口里鸿蒙仍传 harmonyos，宿主不能覆盖。
+- enabledPlatforms 只能包含本应用已开通的 Android、鸿蒙。当前已配置：${platformList}
+- 不要 API Key，不要自建后端转发。app_id 是 ${appId}。
+
+## 自己隐藏互推（hidden）
+GET /v1/info 返回 hidden: true 是 200，不是错误。此时不渲染、不 show、不换一批、不报曝光。
+${hiddenNow}
+
+## 弹窗（不要自己实现）
+show() 会处理：标题用 info.name，说明用 info.description，右上角刷新（只请求一次 recommend）和关闭；卡片进入可视区域后再报曝光；点行进详情，详情里点下载再报点击并跳转。
+showDisableEntry 默认 true，弹窗底部有「不再显示」；用户点了会走 onDisabled，接入方自己摘掉入口。
+
+## 规则
+- 审核中接口可能返回 mock 测试数据，上报 accepted 但不计曝光；通过后自动变为真实推荐。
+- 常见错误：401 unauthorized、403 app_not_approved / app_paused_by_ops、429 rate_limited、404 target_not_found。hidden: true 不是错误。
+`;
 }

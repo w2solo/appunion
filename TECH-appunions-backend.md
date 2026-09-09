@@ -53,7 +53,7 @@ V1 后端要同时撑住三件事：
 
 - Cloudflare Workers / D1 / KV / R2、Render：生产只跑在 Ubuntu + 1Panel 的 Docker（Node + Postgres + 图标卷）。
 - Redis / Kafka / SQS / ClickHouse：日 10 万事件量级用不上。
-- 带 UI 的 SDK、安装归因、设备指纹。
+- 安装归因、设备指纹。Flutter 客户端 SDK 不在后端范围，见接入页与 [pub.dev/packages/appunion_flutter](https://pub.dev/packages/appunion_flutter)。
 - 多租户分库、读写分离。
 
 ---

@@ -7,7 +7,7 @@
 | 本文范围 | 整站：Web 后台、接入文档站、运营台，以及它们如何和 Node 后端拼在一起 |
 | 状态 | 待评审 |
 
-V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」。开发者在网站上注册、建 App、等审核、复制 `app_id`、读文档；宿主 App 直连 `/v1`。运营在同一套网站里审核。
+V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」。开发者在网站上注册、建 App、等审核、复制 `app_id`、读文档；Flutter 用官方 SDK `appunion_flutter`，其它宿主 App 直连 `/v1`。运营在同一套网站里审核。
 
 ---
 
@@ -19,8 +19,9 @@ V1 对外交付的是一套网站 + 一套开放 API，不是「只有后端」�
 | 接入文档 / 样式参考 | 开发者（可未登录阅读） | Web，公开页 |
 | 运营台 | 内部审核 | Web，同一站点，`role = admin` 或超管才看见 |
 | 开放 API | 宿主 App | HTTP JSON，查询参数 `app_id`，无网页 |
+| Flutter SDK | Flutter 宿主 | [`appunion_flutter`](https://pub.dev/packages/appunion_flutter)，入口自绘，列表弹窗由 SDK 提供 |
 
-不做：带 UI 的客户端 SDK、C 端用户站、独立运营后台域名（V1 同一套前端即可）。
+不做：C 端用户站、独立运营后台域名（V1 同一套前端即可）。不提供带广告外观的 SDK；Flutter 官方库入口仍由接入方自己画。
 
 ---
 
@@ -33,6 +34,7 @@ flowchart LR
   end
   subgraph host [开发者的 App]
     Native[Android / iOS / 鸿蒙]
+    Flutter[Flutter SDK]
   end
   subgraph server [Ubuntu_1Panel]
     Api[Hono Node]
@@ -43,6 +45,7 @@ flowchart LR
 
   Web -->|cookie 登录| Api
   Native -->|query app_id| Api
+  Flutter -->|query app_id| Api
   Api --> PG
   Api --> Mem
   Api --> Disk
@@ -157,7 +160,7 @@ flowchart TD
   Ready --> Stats[看曝光点击和是否在池中]
 ```
 
-创建成功后进入应用详情「接入」页，复制 `app_id`。开放接口只用查询参数 `app_id`，客户端直连，不需要 API Key。
+创建成功后进入应用详情「接入」页，复制 `app_id`。Flutter 用官方 SDK [`appunion_flutter`](https://pub.dev/packages/appunion_flutter)（初始化填入当前 `app_id`）；其它客户端开放接口只用查询参数 `app_id`，直连，不需要 API Key。
 
 ### 6.2 运营审核
 
@@ -260,8 +263,8 @@ flowchart TD
 
 **凭证**
 
-- `app_id` 可复制，写在接入页。客户端请求 `/v1` 时带查询参数 `app_id`。
-- 示例：`GET /v1/info?app_id=<uuid>` 画入口 item；用户点击入口后再 `GET /v1/apps/recommend?app_id=<uuid>&platform=android` 弹列表，弹窗顶部用 info 的 `description` 解释联盟。接入页「点击测试」先打 info 出示入口，点入口再拉列表，点行再拉详情；弹窗标明 mock 或真实数据。
+- `app_id` 可复制，写在接入页。Flutter 引导用 [`appunion_flutter`](https://pub.dev/packages/appunion_flutter)；原生客户端请求 `/v1` 时带查询参数 `app_id`。
+- 示例：`GET /v1/info?app_id=<uuid>` 画入口 item；用户点击入口后再 `GET /v1/apps/recommend?app_id=<uuid>&platform=android` 弹列表，弹窗顶部用 info 的 `description` 解释联盟。接入页「点击测试」先打 info 出示入口，点入口再拉列表，点行再拉详情；弹窗标明 mock 或真实数据。Flutter 接入页同时给出可复制的 `initialize` / `fetchInfo` / `show` 代码，Prompt 默认走 SDK。
 
 **配置（展示开关 + 弹窗列表条数）**
 

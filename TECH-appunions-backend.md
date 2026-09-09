@@ -257,6 +257,7 @@ AND paused_by_ops = false
 | rate_info_per_min | 120 | 基本信息接口 |
 | union_name | 应用互推联盟 | 对外名称，管理员改 |
 | union_subtitle | 发现更多好用的 App | 对外宣传语 |
+| union_description | 这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。 | 给终端用户的解释说明，列表弹窗顶部展示 |
 | union_logo_url | 空 | 品牌 logo，经 `/media/icons` 访问 |
 
 门槛是运营参数，改这一行即可，不用发版。
@@ -332,12 +333,18 @@ Query：`app_id` 必填。不需要 `platform`。
 返回联盟对外品牌 + 当前宿主是否展示：
 
 ```json
-{ "name": "应用互推联盟", "subtitle": "发现更多好用的 App", "logo_url": "/media/icons/union-logo.png", "hidden": false }
+{
+  "name": "应用互推联盟",
+  "subtitle": "发现更多好用的 App",
+  "description": "这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。",
+  "logo_url": "/media/icons/union-logo.png",
+  "hidden": false
+}
 ```
 
-`name` / `subtitle` / `logo_url` 来自 `platform_config`，所有宿主相同。`logo_url` 未上传时为空字符串。`hidden` 对应宿主 `paused_by_developer`。审核中同样返回品牌字段；运营暂停仍 403。
+`name` / `subtitle` / `description` / `logo_url` 来自 `platform_config`，所有宿主相同。`logo_url` 未上传时为空字符串。`hidden` 对应宿主 `paused_by_developer`。审核中同样返回品牌字段；运营暂停仍 403。`hidden: true` 时品牌字段（含 `description`）仍返回，客户端仍不渲染互推 UI。
 
-客户端先调本接口：`hidden: true` 时不渲染互推入口。
+客户端进页先调本接口画互推入口 item（`name` / `subtitle` / `logo_url`）；`description` 放在点开后的列表弹窗顶部，向用户解释联盟是做什么的。`hidden: true` 时不渲染。点击入口后再拉 recommend，用弹窗展示列表，不要把列表内嵌进宿主页面。
 
 ### 6.3 `GET /v1/apps/recommend`
 

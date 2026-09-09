@@ -10,7 +10,7 @@ import {
 } from "@appunions/shared";
 import { api } from "../shared/api";
 import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
-import { RecommendListPanel, type RecommendPanelItem } from "../shared/recommend-list-panel";
+import { RecommendListPanel, UnionEntryItem, type RecommendPanelItem } from "../shared/recommend-list-panel";
 
 type RecommendResponse = {
   items: ListingCard[];
@@ -61,11 +61,41 @@ export function AppIntegratePanel({
     await send.run(async () => {
       const nextInfo = await api<UnionInfo>(infoPath);
       setInfo(nextInfo);
+      if (nextInfo.hidden) {
+        const data = await api<RecommendResponse>(v1Path);
+        setResult(data);
+        if (openModal) setOpen(true);
+        return;
+      }
+      if (!openModal) {
+        const data = await api<RecommendResponse>(v1Path);
+        setResult(data);
+        return;
+      }
+      setOpen(false);
+    }, hidden ? "当前为隐藏互推" : openModal ? "已返回入口，点这条 item 弹出列表" : "已换一批");
+  }
+
+  async function openListModal() {
+    await send.run(async () => {
+      const nextInfo = info ?? (await api<UnionInfo>(infoPath));
+      setInfo(nextInfo);
+      if (nextInfo.hidden) {
+        const data = await api<RecommendResponse>(v1Path);
+        setResult(data);
+        setOpen(true);
+        return;
+      }
       const data = await api<RecommendResponse>(v1Path);
       setResult(data);
-      if (openModal) setOpen(true);
-    }, hidden ? "当前为隐藏互推" : "已返回列表");
+      setOpen(true);
+    }, hidden ? "当前为隐藏互推" : "已打开列表弹窗");
   }
+
+  const entryBranding =
+    info && !info.hidden
+      ? { name: info.name, subtitle: info.subtitle, logoUrl: info.logo_url || undefined }
+      : null;
 
   const prompt = buildIntegratePrompt({
     appId,
@@ -100,25 +130,48 @@ export function AppIntegratePanel({
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">交互规范</h2>
         <p className="mt-1 text-sm text-muted">
-          只做一块内嵌列表面板，不要做「查看全部」或全量列表页。面板标题、副标题和 logo 用{" "}
-          <code>GET /v1/info</code> 的返回值，不要写死。按系统原生分组列表来画，并按你 App 的字体和主色微调。
+          <code>GET /v1/info</code> 代表宿主页里的那一条展示 item，同时控制文案和是否显示。点击这条
+          item 再弹出列表弹窗，不要把推荐列表内嵌进当前页，避免占用户过多篇幅。不要做「查看全部」或全量列表页。
+          联盟是做什么的，用 info 的 <code>description</code> 写在弹窗顶部，不要写死本地文案。
         </p>
-        <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm leading-7">
+        <div className="mx-auto mt-4 max-w-[360px] overflow-hidden rounded-[22px] bg-[#f2f2f7] p-3">
+          <div className="overflow-hidden rounded-[14px]">
+            <UnionEntryItem
+              branding={{
+                name: info?.name || "联盟名称",
+                subtitle: info?.subtitle || "宣传语",
+                logoUrl: info?.logo_url || undefined,
+              }}
+              hint="›"
+            />
+          </div>
+          <p className="mt-2 px-1 text-[11px] leading-4 text-slate-500">
+            宿主页只放这一行（name / subtitle / logo 来自 info）。点它才弹出列表；description 放在弹窗顶部。
+          </p>
+        </div>
+        <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm leading-7">
           <li>
-            先调 <code>GET /v1/info</code>。若 <code>hidden: true</code>，不要渲染互推入口。否则用返回的{" "}
-            <code>name</code> / <code>subtitle</code> / <code>logo_url</code> 画面板头。
+            进页只调 <code>GET /v1/info</code>。若 <code>hidden: true</code>，不要渲染互推入口。否则用返回的{" "}
+            <code>name</code> / <code>subtitle</code> / <code>logo_url</code> 画这一条入口 item，像系统设置里的一行
+            cell。入口不要展示 <code>description</code>。
           </li>
-          <li>列表每行：圆角图标、名称、简介（<code>tagline</code>）、右侧「查看」。</li>
           <li>
-            用户点整行后再调 <code>GET /v1/apps/:id</code> 弹出详情：图标、名称、简介、更多描述（
+            用户点击入口后再调 <code>GET /v1/apps/recommend</code>，弹出弹窗或底部 sheet 展示列表。不要一进页就拉列表，也不要把列表铺在当前页上。弹窗顶部用 info 的{" "}
+            <code>description</code> 向用户解释这是什么（可换行，不要截成副标题）。
+          </li>
+          <li>弹窗每行：圆角图标、名称、简介（<code>tagline</code>）、右侧「查看」。</li>
+          <li>
+            用户点整行后再调 <code>GET /v1/apps/:id</code> 叠一层详情：图标、名称、简介、更多描述（
             <code>description</code>）、支持的平台、下载渠道。
           </li>
           <li>
             Android：勾选的应用商店由服务端用 <code>package_name</code> 按各店 schema 拼好 <code>downloads[].url</code>，额外最多一条 https。点按钮直接打开返回的 <code>url</code>，不要自己拼商店地址。
           </li>
           <li>iOS / 鸿蒙：详情里用「打开 App Store / 鸿蒙应用市场」；<code>downloads[].url</code> 为空时，用 <code>package_name</code> 打开对应商店。</li>
-          <li>卡片进入可视区域后再报曝光。点开详情不算点击；用户在详情里点某个下载按钮后再报点击，然后跳转。</li>
-          <li>「换一批」再次请求 recommend。条数以「配置」为准（当前 {listSize} 条）。</li>
+          <li>
+            弹窗里的卡片进入可视区域后再报曝光。入口 item 本身不要报。点开详情不算点击；用户在详情里点某个下载按钮后再报点击，然后跳转。
+          </li>
+          <li>弹窗内「换一批」再次请求 recommend。条数以「配置」为准（当前 {listSize} 条）。</li>
         </ol>
       </section>
 
@@ -126,7 +179,7 @@ export function AppIntegratePanel({
         <h2 className="font-medium">请求与测试</h2>
         <p className="mt-1 text-sm text-muted">
           条数以「配置」为准（当前 {listSize} 条）。先打 <code>/v1/info</code> 看 <code>hidden</code>
-          ，再拉 recommend。审核中返回 mock（根上 <code>mock: true</code>），不计曝光；通过后自动变为真实推荐。
+          并画出入口 item；用户点入口后再拉 recommend。审核中返回 mock（根上 <code>mock: true</code>），不计曝光；通过后自动变为真实推荐。
         </p>
         {hidden && (
           <p className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
@@ -163,6 +216,16 @@ export function AppIntegratePanel({
           </button>
           <ActionStatus error={send.error} message={open ? "" : send.message} />
         </div>
+        {entryBranding && (
+          <div className="mx-auto mt-5 max-w-[360px]">
+            <p className="mb-2 text-xs text-muted">宿主页里的入口 item（点它弹出列表，不要把列表内嵌进来）</p>
+            <div className="overflow-hidden rounded-[22px] bg-[#f2f2f7] p-3">
+              <div className="overflow-hidden rounded-[14px]">
+                <UnionEntryItem branding={entryBranding} hint="›" onClick={() => void openListModal()} />
+              </div>
+            </div>
+          </div>
+        )}
         <div className="mt-5">
           <div className="mb-1 flex items-center justify-between text-xs text-muted">
             <span>客户端正式请求</span>
@@ -203,16 +266,19 @@ POST /v1/events/clicks?app_id=${appId}
       <section className="rounded-lg bg-white p-6 shadow-sm">
         <h2 className="font-medium">接口字段</h2>
         <p className="mt-1 text-sm text-muted">
-          客户端按 <code>info</code> → <code>recommend</code> → 点行再拉 <code>/v1/apps/:id</code> 接入。
+          客户端按 <code>info</code>（入口 item）→ 点入口再 <code>recommend</code>（列表弹窗）→ 点行再拉{" "}
+          <code>/v1/apps/:id</code> 接入。
         </p>
         <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6">
           <li>
-            <code>GET /v1/info</code>：<code>name</code>、<code>subtitle</code>、<code>logo_url</code>{" "}
-            是联盟全局品牌（管理员配置）；<code>hidden</code> 对应本应用展示开关。
+            <code>GET /v1/info</code>：对应宿主页那一条展示 item。<code>name</code>、<code>subtitle</code>、
+            <code>logo_url</code> 是联盟全局品牌（管理员配置），用来画入口 cell；<code>description</code>{" "}
+            是给终端用户的解释说明，展示在列表弹窗顶部；<code>hidden</code> 对应本应用展示开关。不要把{" "}
+            <code>description</code> 和列表项的 <code>tagline</code>、详情的 <code>description</code> 混用。
           </li>
           <li>
             <code>hidden</code> 为 <code>true</code> 时，info 与 recommend 都表示开发者关闭了展示，
-            <strong>这是自己隐藏互推的接口</strong>：recommend 的 <code>items</code> 为空，客户端应隐藏列表面板，不要当成推荐池为空去轮询。
+            <strong>这是自己隐藏互推的接口</strong>：recommend 的 <code>items</code> 为空，客户端应隐藏入口 item，不要当成推荐池为空去轮询。
           </li>
           <li>
             列表每条只含卡片字段 <code>id, name, icon_url, tagline</code>。
@@ -238,7 +304,7 @@ POST /v1/events/clicks?app_id=${appId}
         <h2 className="font-medium">规则摘要</h2>
         <ul className="mt-3 list-disc space-y-2 pl-5 text-sm leading-7">
           <li>同端互推：请求必须带当前端。Android 只出配置了 Android 的应用，iOS、鸿蒙同理。</li>
-          <li>列表面板不含你自己。不要调用 GET /v1/apps 做全量页。</li>
+          <li>推荐列表不含你自己。不要调用 GET /v1/apps 做全量页。</li>
           <li>审核中可用 app_id 拉 mock；上报会 accepted 但不记账。已拒绝才返回 403 app_not_approved。</li>
           <li>审核通过后有观察期（默认 7 天），之后滚动 7 天有效贡献曝光需达门槛（默认 100），否则暂时离开推荐池。</li>
           <li>开发者关闭展示：自己不出现在别人列表；info 与 recommend 仍 200，但 <code>hidden: true</code>，recommend 没有列表。运营暂停：403 app_paused_by_ops，开放接口不可用。</li>
@@ -256,7 +322,7 @@ POST /v1/events/clicks?app_id=${appId}
             {copyPrompt.message ? "已复制" : "复制 Prompt"}
           </button>
         </div>
-        <p className="mt-1 text-sm text-muted">贴给 Cursor / Claude 等，按你 App 的设计做一块内嵌列表和详情弹窗。</p>
+        <p className="mt-1 text-sm text-muted">贴给 Cursor / Claude 等：宿主页只放入口 item，点开后用弹窗展示说明、列表和详情。</p>
         <ActionStatus error={copyPrompt.error} />
         <pre className="mt-3 max-h-[28rem] overflow-auto whitespace-pre-wrap rounded bg-slate-100 p-3 text-xs leading-5">
           {prompt}
@@ -331,7 +397,7 @@ function PreviewModal({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="font-medium">列表面板预览</h3>
+            <h3 className="font-medium">列表弹窗预览</h3>
             <p
               className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs ${
                 hidden
@@ -360,7 +426,12 @@ function PreviewModal({
             <RecommendListPanel
               branding={
                 info
-                  ? { name: info.name, subtitle: info.subtitle, logoUrl: info.logo_url || undefined }
+                  ? {
+                      name: info.name,
+                      subtitle: info.subtitle,
+                      description: info.description,
+                      logoUrl: info.logo_url || undefined,
+                    }
                   : undefined
               }
               items={result.items.map(toPanelItem)}
@@ -426,25 +497,38 @@ function buildIntegratePrompt({
 
   return `你是资深移动端工程师。请为「${appName}」接入 AppUnions 应用互推。
 
-## 只做一块内嵌列表面板 + 详情弹窗
-不要做独立「全部应用」页面，不要分页，不要调用 GET /v1/apps。用户只在当前页看到这一块列表，点「换一批」重新随机抽取。
+AppUnions 是独立开发者的免费等权交叉推广：接入后展示同平台其他 App，自己也会出现在别人列表里。不是广告 SDK，不要做成 Banner、插屏或信息流广告。宿主页只放一条入口，用户点开后才是发现列表。
 
-视觉参考系统原生分组列表（iOS Settings / 类似 inset grouped）：
-- 浅灰底上的白色圆角卡片
-- 面板标题、副标题、logo 必须用 GET /v1/info 返回的 name / subtitle / logo_url，不要写死「发现应用」或本地图标。logo_url 是站点相对路径，展示时拼上 Base URL；为空则不画 logo
-- 右侧「换一批」
+## UI 规范：入口 item + 列表弹窗（禁止内嵌列表）
+GET /v1/info 代表宿主 App 里的「互推入口」这一条 item，同时控制文案和是否展示。
+不要把推荐列表铺在当前页上，那会占用户过多篇幅。不要做独立「全部应用」页，不要分页，不要调用 GET /v1/apps。
+
+两层结构：
+1. 宿主页只放一条紧凑入口（系统设置里的 cell）：左侧 logo、主标题 name、副标题 subtitle、右侧 chevron。入口不要展示 description。
+2. 用户点击这条入口后，弹出弹窗或底部 sheet：顶部用 info.description 向用户解释这是什么，下面是推荐列表；弹窗里再点某一行叠一层应用详情。
+
+进页只调 GET /v1/info，按 hidden 决定画不画入口：
+- hidden: true → 不渲染任何互推 UI
+- hidden: false → 只用 info 的 name / subtitle / logo_url 画这一条入口。不要写死「发现应用」或本地图标。logo_url 是站点相对路径，展示时拼上 Base URL；为空则不画 logo。
+- 入口本身不要请求 recommend，也不要报曝光。
+- info.description 是给终端用户的联盟说明，必须用接口返回值，不要写死本地文案。不要和列表项的 tagline、详情的 description 混用。
+
+点击入口后再调 GET /v1/apps/recommend，用弹窗展示列表：
+- 弹窗顶栏继续用 info 的 name / subtitle / logo，右侧「换一批」
+- 顶栏下方展示 info.description：可换行的灰色说明文字，不要截成一行副标题
+- 浅灰底上的白色圆角卡片，参考系统原生分组列表（iOS Settings / inset grouped）
 - 每行：圆角图标、名称、一句话简介 tagline、右侧「查看」
-- 点整行再请求详情接口，打开应用详情弹窗（不要直接跳商店）
-- 详情：大图标、名称、简介、更多描述 description、支持的平台徽章、下载按钮列表
+- 点整行再请求详情接口，叠一层详情（不要直接跳商店）
+- 详情：大图标、名称、简介、更多描述 description（这是该 App 自己的介绍，不是联盟说明）、支持的平台徽章、下载按钮列表
 - 行与行之间细分割线
 - 按本 App 现有字体、间距和主色微调，不要做成广告横幅
 
 ## 条数
-控制台已把列表条数配成 ${listSize}。GET /v1/apps/recommend 会按这个数量返回，客户端不要再截断、也不要再传更大的 limit。
+控制台已把弹窗列表条数配成 ${listSize}。GET /v1/apps/recommend 会按这个数量返回，客户端不要再截断、也不要再传更大的 limit。
 
 ## 自己隐藏互推（hidden）
 先调 GET /v1/info?app_id=${appId}，根上有 hidden: boolean。
-- hidden: false：再调 recommend，按 items 渲染列表面板。
+- hidden: false：画入口 item。等用户点入口后再调 recommend，用弹窗渲染 items。
 - hidden: true：开发者在控制台关闭了展示开关。这是「自己隐藏互推」接口，不是推荐池为空。此时不要渲染互推 UI，不要换一批，不要轮询，也不要报曝光。若仍请求 recommend，也会返回 hidden: true、items: []。
 - 关闭展示后，本应用也不会出现在别人的列表里。
 ${hiddenNow}
@@ -459,13 +543,13 @@ ${hiddenNow}
 
 ## 接口
 1. GET /v1/info?app_id=${appId}
-   返回 name、subtitle、logo_url（联盟全局品牌）和 hidden（当前应用是否展示）。
+   进页调用。返回 name、subtitle、description、logo_url、hidden。name / subtitle / logo_url 用来画入口 item；description 用来在列表弹窗顶部向用户解释联盟是做什么的；hidden 表示当前应用是否展示。
 2. GET /v1/apps/recommend?app_id=${appId}&platform=<当前端>
-   根上返回 hidden 和 items。hidden 为 false 时从推荐池等权随机，返回 ${listSize} 条卡片（id, name, icon_url, tagline），不含自己。换一批 = 再请求一次。
+   用户点击入口后再调，不要一进页就拉。根上返回 hidden 和 items。hidden 为 false 时从推荐池等权随机，返回 ${listSize} 条卡片（id, name, icon_url, tagline），不含自己。弹窗里换一批 = 再请求一次。
 3. GET /v1/apps/<列表里的 id>?app_id=${appId}&platform=<当前端>
-   点行后再拉。返回 { hidden, item }。item 含 description、category、supported_platforms、downloads 等详情字段。宿主 hidden 时为 { hidden: true }，没有 item。
+   弹窗里点行后再拉。返回 { hidden, item }。item 含 description、category、supported_platforms、downloads 等详情字段。宿主 hidden 时为 { hidden: true }，没有 item。
 4. POST /v1/events/impressions?app_id=${appId}
-   卡片进入可视区域后再报。visible 必须为 true。单次最多 ${IMPRESSION_BATCH_MAX} 条。hidden 为 true 时不要调用。
+   弹窗里的卡片进入可视区域后再报。入口 item 本身不要报。visible 必须为 true。单次最多 ${IMPRESSION_BATCH_MAX} 条。hidden 为 true 时不要调用。
 5. POST /v1/events/clicks?app_id=${appId}
    用户在详情里点某个下载按钮后再报，然后跳转。点开详情本身不要报点击。
 

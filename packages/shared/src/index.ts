@@ -68,8 +68,11 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 export const UNION_NAME_DEFAULT = "应用互推联盟";
 export const UNION_SUBTITLE_DEFAULT = "发现更多好用的 App";
+export const UNION_DESCRIPTION_DEFAULT =
+  "这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。";
 export const UNION_NAME_MAX_GRAPHEMES = 20;
 export const UNION_SUBTITLE_MAX_GRAPHEMES = 40;
+export const UNION_DESCRIPTION_MAX_GRAPHEMES = 120;
 export const UNION_LOGO_ID = "union-logo";
 
 export const TAGLINE_MAX_GRAPHEMES = 30;
@@ -161,6 +164,7 @@ export type ListingItem = ListingCard & {
 export type UnionInfo = {
   name: string;
   subtitle: string;
+  description: string;
   logo_url: string;
   hidden: boolean;
 };

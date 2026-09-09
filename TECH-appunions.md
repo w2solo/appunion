@@ -168,7 +168,7 @@ flowchart TD
 
 ### 6.3 终端用户（不在我们的 Web 里）
 
-发生在开发者自己的 App。Web 只通过文档告诉他们怎么做。流程见 PRD：拉最多 10 条 → 可视区报曝光 → 点击上报并跳转 → 换一批 / 查看全部。
+发生在开发者自己的 App。Web 只通过文档告诉他们怎么做。流程：进页调 `/v1/info` 画一条入口 item → 用户点击后弹出列表弹窗（再拉 recommend，弹窗顶部用 `description` 解释联盟是做什么的）→ 弹窗内卡片进入可视区报曝光 → 点下载上报并跳转 → 「换一批」。不要把列表内嵌进宿主页。
 
 ---
 
@@ -261,9 +261,9 @@ flowchart TD
 **凭证**
 
 - `app_id` 可复制，写在接入页。客户端请求 `/v1` 时带查询参数 `app_id`。
-- 示例：`GET /v1/info?app_id=<uuid>`，再 `GET /v1/apps/recommend?app_id=<uuid>&platform=android`。接入页「点击测试」先打 info 再拉列表，点行再拉详情；弹窗标明 mock 或真实数据。
+- 示例：`GET /v1/info?app_id=<uuid>` 画入口 item；用户点击入口后再 `GET /v1/apps/recommend?app_id=<uuid>&platform=android` 弹列表，弹窗顶部用 info 的 `description` 解释联盟。接入页「点击测试」先打 info 出示入口，点入口再拉列表，点行再拉详情；弹窗标明 mock 或真实数据。
 
-**配置（展示开关 + 列表面板条数）**
+**配置（展示开关 + 弹窗列表条数）**
 
 - 展示开关在配置页，即时 pause / resume。关闭后自己不出现在别人列表，且宿主 info / recommend 返回 `hidden: true`、recommend 空列表。运营暂停时禁用恢复，提示联系运营。
 
@@ -312,7 +312,7 @@ flowchart TD
 ### 7.10 运营：异常 `/ops/anomalies`、参数 `/ops/config`
 
 - 异常：App、类型、窗口、时间。操作可跳到该 App 审核详情去暂停。
-- 参数：对外名称、宣传语、品牌 logo；观察天数、互惠曝光阈值、去重分钟、各限流。门槛数字保存前二次确认。改品牌文案或 logo 不重算推荐池。普通管理员可以改这些。
+- 参数：对外名称、宣传语、解释说明、品牌 logo；观察天数、互惠曝光阈值、去重分钟、各限流。门槛数字保存前二次确认。改品牌文案或 logo 不重算推荐池。普通管理员可以改这些。
 
 接口：`GET/PATCH /admin/config`，`POST /admin/config/logo`，`GET /admin/anomalies`。
 

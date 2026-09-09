@@ -29,12 +29,13 @@ export function isSelfHidden(app: { pausedByDeveloper?: boolean | null }) {
 }
 
 export function unionInfoResponse(
-  config: Pick<PlatformConfig, "unionName" | "unionSubtitle" | "unionLogoUrl">,
+  config: Pick<PlatformConfig, "unionName" | "unionSubtitle" | "unionDescription" | "unionLogoUrl">,
   hidden: boolean,
 ): UnionInfo {
   return {
     name: config.unionName,
     subtitle: config.unionSubtitle,
+    description: config.unionDescription,
     logo_url: config.unionLogoUrl,
     hidden,
   };

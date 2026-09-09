@@ -89,12 +89,20 @@ describe("self-hidden listing responses", () => {
 
   it("builds union info from config and hidden flag", () => {
     const info = unionInfoResponse(
-      { unionName: "应用互推联盟", unionSubtitle: "发现更多好用的 App", unionLogoUrl: "/media/icons/union-logo.png" },
+      {
+        unionName: "应用互推联盟",
+        unionSubtitle: "发现更多好用的 App",
+        unionDescription:
+          "这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。",
+        unionLogoUrl: "/media/icons/union-logo.png",
+      },
       true,
     );
     assert.deepEqual(info, {
       name: "应用互推联盟",
       subtitle: "发现更多好用的 App",
+      description:
+        "这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。",
       logo_url: "/media/icons/union-logo.png",
       hidden: true,
     });

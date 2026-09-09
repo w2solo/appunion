@@ -295,9 +295,9 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
         )}
       </section>
       <section className="rounded-lg bg-white p-6 shadow-sm">
-        <h2 className="font-medium">列表面板</h2>
+        <h2 className="font-medium">弹窗列表</h2>
         <p className="mt-1 text-sm text-muted">
-          客户端只展示一块内嵌列表，不提供「查看全部」。这里设置每次随机展示几条，换一批会按这个数量重新抽取。
+          宿主页只放一条入口 item，点开后用弹窗展示推荐列表，不提供「查看全部」。这里设置弹窗里每次随机几条，换一批按这个数量重新抽取。
         </p>
         <form className="mt-4 max-w-xs space-y-3" onSubmit={(e) => void onSubmit(e)}>
           <label className="block text-sm">

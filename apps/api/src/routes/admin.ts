@@ -23,6 +23,7 @@ import {
   ICON_MAX_BYTES,
   isSuperAdminEmail,
   isValidCategoryName,
+  UNION_DESCRIPTION_MAX_GRAPHEMES,
   UNION_LOGO_ID,
   UNION_NAME_MAX_GRAPHEMES,
   UNION_SUBTITLE_MAX_GRAPHEMES,
@@ -46,6 +47,7 @@ const configPatch = z.object({
   rateClicksPerMin: z.number().int().min(1).max(10_000).optional(),
   unionName: z.string().min(1).optional(),
   unionSubtitle: z.string().min(1).optional(),
+  unionDescription: z.string().min(1).optional(),
 });
 
 function withOpsMeta<T extends object>(c: { env: { SUPER_ADMIN_EMAIL: string } }, row: T) {
@@ -242,11 +244,15 @@ export function adminRoutes(app: Hono<AppEnv>) {
     }
     const unionName = parsed.data.unionName?.trim();
     const unionSubtitle = parsed.data.unionSubtitle?.trim();
+    const unionDescription = parsed.data.unionDescription?.trim();
     if (unionName !== undefined && graphemeLength(unionName) > UNION_NAME_MAX_GRAPHEMES) {
       return sendError(c, 400, ERROR_CODES.invalid_params, `对外名称不能超过 ${UNION_NAME_MAX_GRAPHEMES} 字`);
     }
     if (unionSubtitle !== undefined && graphemeLength(unionSubtitle) > UNION_SUBTITLE_MAX_GRAPHEMES) {
       return sendError(c, 400, ERROR_CODES.invalid_params, `宣传语不能超过 ${UNION_SUBTITLE_MAX_GRAPHEMES} 字`);
+    }
+    if (unionDescription !== undefined && graphemeLength(unionDescription) > UNION_DESCRIPTION_MAX_GRAPHEMES) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, `解释说明不能超过 ${UNION_DESCRIPTION_MAX_GRAPHEMES} 字`);
     }
     const current = await getConfig(db);
     const [updated] = await db
@@ -264,6 +270,7 @@ export function adminRoutes(app: Hono<AppEnv>) {
         rateClicksPerMin: parsed.data.rateClicksPerMin ?? current.rateClicksPerMin,
         unionName: unionName || current.unionName,
         unionSubtitle: unionSubtitle || current.unionSubtitle,
+        unionDescription: unionDescription || current.unionDescription,
       })
       .where(eq(platformConfig.id, 1))
       .returning();

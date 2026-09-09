@@ -205,6 +205,9 @@ export const platformConfig = pgTable("platform_config", {
   rateClicksPerMin: integer("rate_clicks_per_min").notNull().default(60),
   unionName: text("union_name").notNull().default("应用互推联盟"),
   unionSubtitle: text("union_subtitle").notNull().default("发现更多好用的 App"),
+  unionDescription: text("union_description")
+    .notNull()
+    .default("这里汇集了独立开发者做的同平台 App。不是广告，所有应用等权随机出现，点开就能发现更多好用的工具。"),
   unionLogoUrl: text("union_logo_url").notNull().default(""),
 });
 

@@ -17,7 +17,43 @@ export type RecommendPanelBrand = {
   name: string;
   subtitle: string;
   logoUrl?: string;
+  description?: string;
 };
+
+export function UnionEntryItem({
+  branding,
+  onClick,
+  hint = "点击打开",
+}: {
+  branding: RecommendPanelBrand;
+  onClick?: () => void;
+  hint?: string;
+}) {
+  const inner = (
+    <>
+      {branding.logoUrl ? (
+        <img src={branding.logoUrl} alt="" className="h-10 w-10 shrink-0 rounded-[10px] object-cover" />
+      ) : null}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[15px] font-medium leading-5">{branding.name}</div>
+        {branding.subtitle ? (
+          <div className="truncate text-[12px] leading-4 text-slate-500">{branding.subtitle}</div>
+        ) : null}
+      </div>
+      <span className="shrink-0 text-[13px] text-slate-400">{hint}</span>
+    </>
+  );
+
+  if (!onClick) {
+    return <div className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left">{inner}</div>;
+  }
+
+  return (
+    <button className="flex w-full items-center gap-3 bg-white px-4 py-3 text-left" type="button" onClick={onClick}>
+      {inner}
+    </button>
+  );
+}
 
 export function RecommendListPanel({
   items,
@@ -88,6 +124,11 @@ export function RecommendListPanel({
             </button>
           )}
         </div>
+        {branding?.description ? (
+          <p className="border-t border-black/[0.06] px-4 py-2.5 text-[12px] leading-5 text-slate-500">
+            {branding.description}
+          </p>
+        ) : null}
         {items.length === 0 ? (
           <p className="border-t border-black/[0.06] px-4 py-8 text-center text-[13px] text-slate-500">{emptyText}</p>
         ) : (

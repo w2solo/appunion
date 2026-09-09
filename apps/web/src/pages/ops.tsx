@@ -303,6 +303,7 @@ export function OpsConfigPage() {
         body: JSON.stringify({
           unionName: String(fd.get("unionName") ?? "").trim(),
           unionSubtitle: String(fd.get("unionSubtitle") ?? "").trim(),
+          unionDescription: String(fd.get("unionDescription") ?? "").trim(),
         }),
       });
       setCfg(updated);
@@ -345,7 +346,9 @@ export function OpsConfigPage() {
       </section>
       <form className="space-y-3 rounded-lg bg-white p-6 shadow-sm" onSubmit={(e) => void onBrandSubmit(e)}>
         <h2 className="font-medium">对外展示</h2>
-        <p className="text-sm text-muted">客户端通过 GET /v1/info 拿到名称、宣传语和 logo，用来画互推入口。</p>
+        <p className="text-sm text-muted">
+          客户端通过 GET /v1/info 拿到名称、宣传语、解释说明和 logo。入口 cell 用名称/宣传语/logo，解释说明展示在列表弹窗顶部。
+        </p>
         <label className="block text-sm">
           对外名称
           <input
@@ -364,6 +367,17 @@ export function OpsConfigPage() {
             key={`subtitle-${cfg.unionSubtitle}`}
             name="unionSubtitle"
             required
+          />
+        </label>
+        <label className="block text-sm">
+          解释说明
+          <textarea
+            className="mt-1 w-full rounded border border-line px-3 py-2"
+            defaultValue={cfg.unionDescription}
+            key={`description-${cfg.unionDescription}`}
+            name="unionDescription"
+            required
+            rows={3}
           />
         </label>
         <div className="text-sm">
@@ -546,13 +560,14 @@ type OpsConfig = {
   rateClicksPerMin: number;
   unionName: string;
   unionSubtitle: string;
+  unionDescription: string;
   unionLogoUrl: string;
   superAdminEmail: string;
 };
 
 type NumericConfigKey = Exclude<
   keyof OpsConfig,
-  "superAdminEmail" | "unionName" | "unionSubtitle" | "unionLogoUrl"
+  "superAdminEmail" | "unionName" | "unionSubtitle" | "unionDescription" | "unionLogoUrl"
 >;
 
 type CategoryNode = { id: string; name: string; appCount: number; children: { id: string; name: string; appCount: number }[] };

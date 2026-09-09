@@ -78,12 +78,15 @@ export const UNION_LOGO_ID = "union-logo";
 export const TAGLINE_MAX_GRAPHEMES = 30;
 export const DESCRIPTION_MAX_GRAPHEMES = 200;
 export const EXTRA_DOWNLOAD_MAX = 1;
-export const EXTRA_DOWNLOAD_LABEL_MAX = 20;
 export const EXTRA_DOWNLOAD_DEFAULT_LABEL = "官网";
+export const ANDROID_DOWNLOAD_REQUIRED_ERROR = "请勾选已上架应用商店，或填写官网";
 export const ICON_MAX_BYTES = 512 * 1024;
 export const PACKAGE_NAME_MAX = 255;
 
-export const ANDROID_STORES = [
+export const ANDROID_STORE = "market";
+export const ANDROID_STORE_LABEL = "打开应用商店";
+
+const LEGACY_ANDROID_STORES = [
   "play",
   "huawei",
   "honor",
@@ -93,52 +96,24 @@ export const ANDROID_STORES = [
   "tencent",
   "coolapk",
 ] as const;
-export type AndroidStore = (typeof ANDROID_STORES)[number];
 
-export const ANDROID_STORE_LABELS: Record<AndroidStore, string> = {
-  play: "Google Play",
-  huawei: "华为应用市场",
-  honor: "荣耀应用市场",
-  xiaomi: "小米应用商店",
-  oppo: "OPPO 软件商店",
-  vivo: "vivo 应用商店",
-  tencent: "应用宝",
-  coolapk: "酷安",
-};
-
-export const ANDROID_FALLBACK_STORE = "market";
-export const ANDROID_FALLBACK_STORE_LABEL = "打开应用商店";
-
-export function isAndroidStore(value: string): value is AndroidStore {
-  return (ANDROID_STORES as readonly string[]).includes(value);
+export function isAndroidListedToken(value: string): boolean {
+  return value === ANDROID_STORE || (LEGACY_ANDROID_STORES as readonly string[]).includes(value);
 }
 
-export function androidStoreUrl(store: AndroidStore, packageName: string): string {
-  switch (store) {
-    case "play":
-      return `market://details?id=${encodeURIComponent(packageName)}`;
-    case "huawei":
-      return `appmarket://details?id=${encodeURIComponent(packageName)}`;
-    case "honor":
-      return `honormarket://details?id=${encodeURIComponent(packageName)}`;
-    case "xiaomi":
-      return `mimarket://details?id=${encodeURIComponent(packageName)}`;
-    case "oppo":
-      return `oppomarket://details?packagename=${encodeURIComponent(packageName)}`;
-    case "vivo":
-      return `vivomarket://details?id=${encodeURIComponent(packageName)}`;
-    case "tencent":
-      return `tmast://appdetails?pname=${encodeURIComponent(packageName)}`;
-    case "coolapk":
-      return `coolmarket://apk/${encodeURIComponent(packageName)}`;
-  }
-}
-
-export function androidFallbackStoreUrl(packageName: string): string {
+export function androidStoreUrl(packageName: string): string {
   return `market://details?id=${encodeURIComponent(packageName)}`;
 }
 
 export type ExtraDownload = { label: string; url: string };
+
+export function isAndroidListed(
+  downloadStores?: string[] | null,
+  extraDownloads?: ExtraDownload[] | null,
+): boolean {
+  if ((downloadStores ?? []).some(isAndroidListedToken)) return true;
+  return (extraDownloads ?? []).length === 0;
+}
 
 export type ListingDownload =
   | { kind: "store"; store: string; label: string; url: string }
@@ -192,47 +167,50 @@ export function supportedPlatformsOf(platforms: { platform: string }[]): Platfor
   return PLATFORMS.filter((platform) => set.has(platform));
 }
 
-export function parseDownloadStores(raw: unknown): { ok: true; value: AndroidStore[] } | { ok: false; error: string } {
+export function parseDownloadStores(raw: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
   if (raw == null) return { ok: true, value: [] };
   if (!Array.isArray(raw)) return { ok: false, error: "下载平台无效" };
-  const seen = new Set<string>();
-  const value: AndroidStore[] = [];
+  let listed = false;
   for (const item of raw) {
-    if (typeof item !== "string" || !isAndroidStore(item)) {
+    if (typeof item !== "string" || !isAndroidListedToken(item)) {
       return { ok: false, error: "下载平台无效" };
     }
-    if (seen.has(item)) continue;
-    seen.add(item);
-    value.push(item);
+    listed = true;
   }
-  return { ok: true, value };
+  return { ok: true, value: listed ? [ANDROID_STORE] : [] };
 }
 
 export function parseExtraDownloads(
   raw: unknown,
 ): { ok: true; value: ExtraDownload[] } | { ok: false; error: string } {
   if (raw == null) return { ok: true, value: [] };
-  if (!Array.isArray(raw)) return { ok: false, error: "额外下载地址无效" };
+  if (!Array.isArray(raw)) return { ok: false, error: "官网地址无效" };
   if (raw.length > EXTRA_DOWNLOAD_MAX) {
-    return { ok: false, error: "额外下载地址只需填一条" };
+    return { ok: false, error: "官网只需填一条" };
   }
   const value: ExtraDownload[] = [];
   for (const item of raw) {
     if (!item || typeof item !== "object") {
-      return { ok: false, error: "额外下载地址无效" };
+      return { ok: false, error: "官网地址无效" };
     }
-    const label = String("label" in item ? item.label : "").trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL;
     const url = String("url" in item ? item.url : "").trim();
     if (!url) continue;
-    if (graphemeLength(label) > EXTRA_DOWNLOAD_LABEL_MAX) {
-      return { ok: false, error: `下载名称不能超过 ${EXTRA_DOWNLOAD_LABEL_MAX} 字` };
-    }
     if (!isValidHttpsUrl(url)) {
-      return { ok: false, error: "下载地址须为 https 链接" };
+      return { ok: false, error: "官网须为 https 链接" };
     }
-    value.push({ label, url });
+    value.push({ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url });
   }
   return { ok: true, value };
+}
+
+export function androidDownloadChannelsError(
+  downloadStores: string[],
+  extraDownloads: ExtraDownload[],
+): string | null {
+  if (downloadStores.length === 0 && extraDownloads.length === 0) {
+    return ANDROID_DOWNLOAD_REQUIRED_ERROR;
+  }
+  return null;
 }
 
 export function buildDownloads(input: {
@@ -242,24 +220,19 @@ export function buildDownloads(input: {
   extraDownloads?: ExtraDownload[] | null;
 }): ListingDownload[] {
   if (input.platform === "android") {
-    const stores = (input.downloadStores ?? []).filter(isAndroidStore);
     const extras = (input.extraDownloads ?? []).slice(0, EXTRA_DOWNLOAD_MAX);
-    const downloads: ListingDownload[] = stores.map((store) => ({
-      kind: "store",
-      store,
-      label: ANDROID_STORE_LABELS[store],
-      url: androidStoreUrl(store, input.packageName),
-    }));
-    for (const extra of extras) {
-      downloads.push({ kind: "url", label: extra.label, url: extra.url });
-    }
-    if (downloads.length === 0) {
+    const listed = isAndroidListed(input.downloadStores, extras);
+    const downloads: ListingDownload[] = [];
+    if (listed) {
       downloads.push({
         kind: "store",
-        store: ANDROID_FALLBACK_STORE,
-        label: ANDROID_FALLBACK_STORE_LABEL,
-        url: androidFallbackStoreUrl(input.packageName),
+        store: ANDROID_STORE,
+        label: ANDROID_STORE_LABEL,
+        url: androidStoreUrl(input.packageName),
       });
+    }
+    for (const extra of extras) {
+      downloads.push({ kind: "url", label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: extra.url });
     }
     return downloads;
   }

@@ -256,7 +256,7 @@ flowchart TD
 
 **支持的平台**
 
-勾选 Android / iOS / 鸿蒙，每端填写包名。`PUT /dashboard/apps/:id/platforms` 覆盖保存。未配置任何端则无法进入推荐/全量列表。
+勾选 Android / iOS / 鸿蒙，每端填写包名。Android 另填是否已上架应用商店和官网（至少一项）；商店跳转统一 `market://details?id=<包名>`，不区分各家应用市场。`PUT /dashboard/apps/:id/platforms` 覆盖保存。未配置任何端则无法进入推荐/全量列表。
 
 **凭证**
 

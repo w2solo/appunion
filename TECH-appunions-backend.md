@@ -174,6 +174,8 @@ AND paused_by_ops = false
 | app_id | uuid FK | |
 | platform | text | `android` / `ios` / `harmonyos` |
 | package_name | text | Android applicationId / iOS Bundle ID / 鸿蒙 bundleName |
+| download_stores | jsonb | Android：`["market"]` 已上架，`[]` 未上架。其它端为空数组 |
+| extra_downloads | jsonb | Android：最多一条 `{ label: "官网", url }`，其它端为空数组 |
 | created_at | timestamptz | |
 
 **api_keys**
@@ -402,6 +404,8 @@ Query：`app_id` 必填；`platform` 必填。路径参数是列表里的目标�
 
 详情 `item` 在卡片基础上增加 `description, category, subcategory, platform, package_name, supported_platforms, downloads`。
 
+Android `downloads` 最多两条：已上架时 `{ kind: "store", store: "market", label: "打开应用商店", url: "market://details?id=<package_name>" }`，有官网时再加 `{ kind: "url", label: "官网", url }`。不区分各家应用市场。iOS / 鸿蒙通常一条 `kind: "store"` 且 `url` 为空，客户端用 `package_name` 打开对应商店。
+
 不要返回开发者邮箱、审核状态、是否在池中、统计数字。
 
 ### 6.7 `POST /v1/events/impressions`
@@ -567,7 +571,7 @@ Query：`app_id` 必填（宿主 UUID）。请求体 `app_id` 是被点击的目
 | POST | `/dashboard/apps` | 创建，`multipart`（名称、描述、分类、图标）。生成 api_key，**响应里明文只出现这一次** |
 | GET | `/dashboard/apps/:id` | 资料 + `platforms` + 审核状态 + key_prefix + 池状态 + 门槛缺口 |
 | PATCH | `/dashboard/apps/:id` | 改名称/描述/分类。已通过的资料变更是否重新进审核：见 D3 |
-| PUT | `/dashboard/apps/:id/platforms` | 覆盖该 App 的端与包名。`{ platforms: [{ platform, packageName }] }` |
+| PUT | `/dashboard/apps/:id/platforms` | 覆盖该 App 的端与包名。Android 另收 `downloadStores`（`["market"]` 或 `[]`）和 `extraDownloads`（最多一条官网），至少填一项 |
 | POST | `/dashboard/apps/:id/resubmit` | 拒绝后重提，`review_status → pending`，清 `rejected_reason` |
 | POST | `/dashboard/apps/:id/pause` | `paused_by_developer = true`，立刻出池、出全量列表；宿主 info / recommend 返回 `hidden: true`，recommend 空列表 |
 | POST | `/dashboard/apps/:id/resume` | 仅当 `paused_by_ops = false` |

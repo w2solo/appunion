@@ -4,7 +4,7 @@ import { ActionStatus, useActionFeedback } from "../shared/action-status";
 import { api } from "../shared/api";
 import { useAuth } from "../shared/auth";
 import { platformLabel, statusLabel } from "../shared/status";
-import { ANDROID_STORE_LABELS, isAndroidStore } from "@appunions/shared";
+import { EXTRA_DOWNLOAD_DEFAULT_LABEL, isAndroidListed } from "@appunions/shared";
 import { SuggestInput } from "../shared/category-fields";
 
 type AdminApp = {
@@ -157,20 +157,14 @@ export function OpsAppPage() {
               {p.platform === "android" && (
                 <div className="mt-1 space-y-1 text-muted">
                   <p>
-                    下载平台：
-                    {(p.downloadStores ?? []).filter(isAndroidStore).length === 0
-                      ? "未选（走系统应用商店）"
-                      : (p.downloadStores ?? [])
-                          .filter(isAndroidStore)
-                          .map((store) => ANDROID_STORE_LABELS[store])
-                          .join("、")}
+                    {isAndroidListed(p.downloadStores, p.extraDownloads) ? "已上架应用商店" : "未上架应用商店"}
                   </p>
                   {(p.extraDownloads ?? []).length > 0 && (
                     <p>
-                      额外下载：
+                      {EXTRA_DOWNLOAD_DEFAULT_LABEL}：
                       {(p.extraDownloads ?? []).slice(0, 1).map((item) => (
                         <a key={item.url} className="text-brand" href={item.url} rel="noreferrer" target="_blank">
-                          {item.label} {item.url}
+                          {item.url}
                         </a>
                       ))}
                     </p>

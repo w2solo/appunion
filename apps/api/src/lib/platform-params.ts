@@ -8,7 +8,7 @@ export const platformsSchema = z.object({
         platform: z.enum(PLATFORMS),
         packageName: z.string().min(1),
         downloadStores: z.array(z.string()).optional(),
-        extraDownloads: z.array(z.object({ label: z.string(), url: z.string() })).optional(),
+        extraDownloads: z.array(z.object({ label: z.string().optional(), url: z.string() })).optional(),
       }),
     )
     .max(PLATFORMS.length),
@@ -41,7 +41,7 @@ export function platformsSchemaError(error: z.ZodError, raw: unknown): string {
     return label ? `${label} 包名无效` : "包名无效";
   }
   if (field === "downloadStores") return "下载平台无效";
-  if (field === "extraDownloads") return "额外下载地址无效";
+  if (field === "extraDownloads") return "官网地址无效";
   return "平台参数无效";
 }
 

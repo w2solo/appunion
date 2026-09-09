@@ -29,6 +29,7 @@ import {
   graphemeLength,
   isValidCategoryName,
   isValidPackageName,
+  androidDownloadChannelsError,
   parseDownloadStores,
   parseExtraDownloads,
 } from "@appunions/shared";
@@ -356,6 +357,8 @@ export function dashboardAppRoutes(app: Hono<AppEnv>) {
         if (!stores.ok) return sendError(c, 400, ERROR_CODES.invalid_params, stores.error);
         const extras = parseExtraDownloads(item.extraDownloads);
         if (!extras.ok) return sendError(c, 400, ERROR_CODES.invalid_params, extras.error);
+        const channelError = androidDownloadChannelsError(stores.value, extras.value);
+        if (channelError) return sendError(c, 400, ERROR_CODES.invalid_params, channelError);
         downloadStores = stores.value;
         extraDownloads = extras.value;
       }

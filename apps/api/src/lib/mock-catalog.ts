@@ -1,4 +1,6 @@
 import {
+  ANDROID_STORE,
+  EXTRA_DOWNLOAD_DEFAULT_LABEL,
   buildDownloads,
   listingCardOf,
   type ExtraDownload,
@@ -200,18 +202,15 @@ export function mockIconUrl(id: string): string {
   return `/media/mock-icons/${id}.svg`;
 }
 
-function mockAndroidStores(slug: string) {
+function mockAndroidChannels(slug: string): {
+  downloadStores: string[];
+  extraDownloads: ExtraDownload[];
+} {
   const n = slug.charCodeAt(slug.length - 1) % 3;
-  if (n === 0) return ["play", "huawei"] as const;
-  if (n === 1) return ["xiaomi", "tencent"] as const;
-  return [] as const;
-}
-
-function mockExtras(app: MockApp): ExtraDownload[] {
-  if (app.slug.endsWith("5") || app.slug.endsWith("0")) {
-    return [{ label: "官网", url: `https://example.com/${app.slug}` }];
-  }
-  return [];
+  const site: ExtraDownload[] = [{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: `https://example.com/${slug}` }];
+  if (n === 0) return { downloadStores: [ANDROID_STORE], extraDownloads: [] };
+  if (n === 1) return { downloadStores: [], extraDownloads: site };
+  return { downloadStores: [ANDROID_STORE], extraDownloads: site };
 }
 
 function listingOf(app: MockApp, platform: Platform): ListingItem {
@@ -230,8 +229,7 @@ function listingOf(app: MockApp, platform: Platform): ListingItem {
     downloads: buildDownloads({
       platform,
       packageName,
-      downloadStores: platform === "android" ? [...mockAndroidStores(app.slug)] : [],
-      extraDownloads: platform === "android" ? mockExtras(app) : [],
+      ...(platform === "android" ? mockAndroidChannels(app.slug) : {}),
     }),
   };
 }

@@ -1,11 +1,10 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import {
-  ANDROID_STORE_LABELS,
-  ANDROID_STORES,
+  ANDROID_DOWNLOAD_REQUIRED_ERROR,
+  ANDROID_STORE,
   DESCRIPTION_MAX_GRAPHEMES,
   EXTRA_DOWNLOAD_DEFAULT_LABEL,
-  EXTRA_DOWNLOAD_LABEL_MAX,
   LIST_SIZE_MAX,
   LIST_SIZE_MIN,
   PACKAGE_NAME_HINTS,
@@ -13,7 +12,7 @@ import {
   PLATFORM_LABELS,
   TAGLINE_MAX_GRAPHEMES,
   graphemeLength,
-  isAndroidStore,
+  isAndroidListed,
   isValidHttpsUrl,
   isValidPackageName,
   type ExtraDownload,
@@ -324,19 +323,6 @@ function ConfigTab({ app, onSaved }: { app: AppDetail; onSaved: () => Promise<vo
   );
 }
 
-function emptyStores(): Record<(typeof ANDROID_STORES)[number], boolean> {
-  return {
-    play: false,
-    huawei: false,
-    honor: false,
-    xiaomi: false,
-    oppo: false,
-    vivo: false,
-    tencent: false,
-    coolapk: false,
-  };
-}
-
 function PlatformsSection({
   app,
   onSaved,
@@ -355,17 +341,10 @@ function PlatformsSection({
     for (const p of app.platforms) next[p.platform] = p.packageName;
     return next;
   });
-  const [androidStores, setAndroidStores] = useState(() => {
-    const next = emptyStores();
+  const [listedInStore, setListedInStore] = useState(() => {
     const android = app.platforms.find((p) => p.platform === "android");
-    for (const store of android?.downloadStores ?? []) {
-      if (isAndroidStore(store)) next[store] = true;
-    }
-    return next;
-  });
-  const [extraLabel, setExtraLabel] = useState(() => {
-    const android = app.platforms.find((p) => p.platform === "android");
-    return android?.extraDownloads?.[0]?.label || EXTRA_DOWNLOAD_DEFAULT_LABEL;
+    if (!android) return true;
+    return isAndroidListed(android.downloadStores, android.extraDownloads);
   });
   const [extraUrl, setExtraUrl] = useState(() => {
     const android = app.platforms.find((p) => p.platform === "android");
@@ -375,19 +354,14 @@ function PlatformsSection({
   useEffect(() => {
     const nextEnabled = { android: false, ios: false, harmonyos: false } as Record<Platform, boolean>;
     const nextNames = { android: "", ios: "", harmonyos: "" } as Record<Platform, string>;
-    const nextStores = emptyStores();
     for (const p of app.platforms) {
       nextEnabled[p.platform] = true;
       nextNames[p.platform] = p.packageName;
     }
     const android = app.platforms.find((p) => p.platform === "android");
-    for (const store of android?.downloadStores ?? []) {
-      if (isAndroidStore(store)) nextStores[store] = true;
-    }
     setEnabled(nextEnabled);
     setNames(nextNames);
-    setAndroidStores(nextStores);
-    setExtraLabel(android?.extraDownloads?.[0]?.label || EXTRA_DOWNLOAD_DEFAULT_LABEL);
+    setListedInStore(android ? isAndroidListed(android.downloadStores, android.extraDownloads) : true);
     setExtraUrl(android?.extraDownloads?.[0]?.url ?? "");
   }, [app.platforms]);
 
@@ -415,13 +389,13 @@ function PlatformsSection({
           throw new Error(`${label} 包名格式无效，需为反向域名如 com.company.app`);
         }
       }
-      if (enabled.android && extraUrl.trim()) {
-        const downloadLabel = extraLabel.trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL;
-        if (graphemeLength(downloadLabel) > EXTRA_DOWNLOAD_LABEL_MAX) {
-          throw new Error(`下载名称不能超过 ${EXTRA_DOWNLOAD_LABEL_MAX} 字`);
+      if (enabled.android) {
+        const website = extraUrl.trim();
+        if (!listedInStore && !website) {
+          throw new Error(ANDROID_DOWNLOAD_REQUIRED_ERROR);
         }
-        if (!isValidHttpsUrl(extraUrl.trim())) {
-          throw new Error("下载地址须为 https 链接");
+        if (website && !isValidHttpsUrl(website)) {
+          throw new Error("官网须为 https 链接");
         }
       }
       const platforms = selected.map((p) => ({
@@ -429,9 +403,9 @@ function PlatformsSection({
         packageName: names[p].trim(),
         ...(p === "android"
           ? {
-              downloadStores: ANDROID_STORES.filter((store) => androidStores[store]),
+              downloadStores: listedInStore ? [ANDROID_STORE] : [],
               extraDownloads: extraUrl.trim()
-                ? [{ label: extraLabel.trim() || EXTRA_DOWNLOAD_DEFAULT_LABEL, url: extraUrl.trim() }]
+                ? [{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: extraUrl.trim() }]
                 : [],
             }
           : {}),
@@ -448,7 +422,8 @@ function PlatformsSection({
     <section className="rounded-lg bg-white p-6 shadow-sm">
       <h2 className="font-medium">支持的平台</h2>
       <p className="mt-1 text-sm text-muted">
-        勾选端并填写包名。Android 勾选上架的应用商店即可，商店跳转由包名按各店 schema 拼好后随接口返回；额外只需再填一条 https 下载地址。
+        勾选端并填写包名。Android 只需标记是否已上架应用商店，并可再填官网；商店跳转统一走{" "}
+        <code>market://</code>。
       </p>
       {app.platforms.length === 0 && (
         <p className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -476,45 +451,27 @@ function PlatformsSection({
                 />
                 {p === "android" && (
                   <div className="mt-3 space-y-3">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={listedInStore}
+                        onChange={(e) => setListedInStore(e.target.checked)}
+                      />
+                      已上架应用商店
+                    </label>
+                    <p className="text-xs text-muted">
+                      勾选后详情里会出现「打开应用商店」，跳转统一为{" "}
+                      <code>market://details?id=&lt;包名&gt;</code>。
+                    </p>
                     <div>
-                      <p className="text-sm font-medium">下载平台</p>
-                      <p className="mt-0.5 text-xs text-muted">
-                        不必填商店链接。接口会用包名拼出对应商店的跳转 URL。都不选则走系统应用商店。
-                      </p>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
-                        {ANDROID_STORES.map((store) => (
-                          <label key={store} className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={androidStores[store]}
-                              onChange={(e) =>
-                                setAndroidStores((prev) => ({ ...prev, [store]: e.target.checked }))
-                              }
-                            />
-                            {ANDROID_STORE_LABELS[store]}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">额外下载地址</p>
-                      <p className="mt-0.5 text-xs text-muted">
-                        只需一条 https 链接，例如官网或 APK。名称不超过 {EXTRA_DOWNLOAD_LABEL_MAX} 字，可留空。
-                      </p>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <input
-                          className="w-28 rounded border border-line px-3 py-2 text-sm"
-                          placeholder={EXTRA_DOWNLOAD_DEFAULT_LABEL}
-                          value={extraLabel}
-                          onChange={(e) => setExtraLabel(e.target.value)}
-                        />
-                        <input
-                          className="min-w-[12rem] flex-1 rounded border border-line px-3 py-2 text-sm"
-                          placeholder="https://"
-                          value={extraUrl}
-                          onChange={(e) => setExtraUrl(e.target.value)}
-                        />
-                      </div>
+                      <p className="text-sm font-medium">官网</p>
+                      <p className="mt-0.5 text-xs text-muted">https 链接，可与上架同时填；未上架时必须填。</p>
+                      <input
+                        className="mt-2 w-full rounded border border-line px-3 py-2 text-sm"
+                        placeholder="https://"
+                        value={extraUrl}
+                        onChange={(e) => setExtraUrl(e.target.value)}
+                      />
                     </div>
                   </div>
                 )}

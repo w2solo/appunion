@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { computeInRecommendPool, isCatalogVisible } from "@appunions/db";
 import {
+  ANDROID_DOWNLOAD_REQUIRED_ERROR,
+  ANDROID_STORE,
+  ANDROID_STORE_LABEL,
+  EXTRA_DOWNLOAD_DEFAULT_LABEL,
+  androidDownloadChannelsError,
   buildDownloads,
+  isAndroidListed,
   isSuperAdminEmail,
   isValidCategoryName,
   isValidHttpsUrl,
@@ -231,29 +237,49 @@ describe("mock catalog", () => {
 });
 
 describe("android downloads", () => {
-  it("builds store urls and extra links, falling back to market", () => {
-    const withStores = buildDownloads({
+  it("builds a single market url and optional website", () => {
+    const listedAndSite = buildDownloads({
       platform: "android",
       packageName: "com.company.app",
       downloadStores: ["huawei", "play"],
-      extraDownloads: [{ label: "官网", url: "https://example.com/app" }],
+      extraDownloads: [{ label: "APK", url: "https://example.com/app" }],
     });
     assert.deepEqual(
-      withStores.map((item) => item.label),
-      ["华为应用市场", "Google Play", "官网"],
+      listedAndSite.map((item) => item.label),
+      [ANDROID_STORE_LABEL, EXTRA_DOWNLOAD_DEFAULT_LABEL],
     );
-    assert.equal(withStores[0]?.url, "appmarket://details?id=com.company.app");
-    assert.equal(withStores[2]?.kind, "url");
+    assert.equal(listedAndSite[0]?.store, ANDROID_STORE);
+    assert.equal(listedAndSite[0]?.url, "market://details?id=com.company.app");
+    assert.equal(listedAndSite[1]?.kind, "url");
+    assert.equal(listedAndSite[1]?.label, EXTRA_DOWNLOAD_DEFAULT_LABEL);
 
-    const fallback = buildDownloads({
+    const websiteOnly = buildDownloads({
+      platform: "android",
+      packageName: "com.company.app",
+      downloadStores: [],
+      extraDownloads: [{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "https://example.com/app" }],
+    });
+    assert.equal(websiteOnly.length, 1);
+    assert.equal(websiteOnly[0]?.kind, "url");
+    assert.equal(websiteOnly[0]?.url, "https://example.com/app");
+
+    const listedOnly = buildDownloads({
+      platform: "android",
+      packageName: "com.company.app",
+      downloadStores: [ANDROID_STORE],
+      extraDownloads: [],
+    });
+    assert.equal(listedOnly.length, 1);
+    assert.equal(listedOnly[0]?.url, "market://details?id=com.company.app");
+
+    const legacyEmpty = buildDownloads({
       platform: "android",
       packageName: "com.company.app",
       downloadStores: [],
       extraDownloads: [],
     });
-    assert.equal(fallback.length, 1);
-    assert.equal(fallback[0]?.label, "打开应用商店");
-    assert.equal(fallback[0]?.url, "market://details?id=com.company.app");
+    assert.equal(legacyEmpty.length, 1);
+    assert.equal(legacyEmpty[0]?.url, "market://details?id=com.company.app");
   });
 
   it("ios and harmonyos keep a store button with empty url", () => {
@@ -265,23 +291,33 @@ describe("android downloads", () => {
     assert.equal(harmony[0]?.url, "");
   });
 
-  it("validates https extras and store keys", () => {
+  it("validates https website, store tokens, and requires a channel", () => {
     assert.equal(isValidHttpsUrl("https://example.com/a"), true);
     assert.equal(isValidHttpsUrl("http://example.com/a"), false);
     assert.equal(parseDownloadStores(["huawei", "nope"]).ok, false);
-    assert.deepEqual(parseDownloadStores(["xiaomi", "xiaomi"]), { ok: true, value: ["xiaomi"] });
-    assert.equal(parseExtraDownloads([{ label: "官网", url: "http://x.com" }]).ok, false);
-    assert.equal(parseExtraDownloads([{ label: "官网", url: "https://example.com" }]).ok, true);
+    assert.deepEqual(parseDownloadStores(["xiaomi", "xiaomi"]), { ok: true, value: [ANDROID_STORE] });
+    assert.deepEqual(parseDownloadStores(["market"]), { ok: true, value: [ANDROID_STORE] });
+    assert.equal(parseExtraDownloads([{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "http://x.com" }]).ok, false);
+    assert.equal(parseExtraDownloads([{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "https://example.com" }]).ok, true);
     assert.equal(
       parseExtraDownloads([
-        { label: "官网", url: "https://a.com" },
+        { label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "https://a.com" },
         { label: "APK", url: "https://b.com" },
       ]).ok,
       false,
     );
     const unnamed = parseExtraDownloads([{ url: "https://example.com/app" }]);
     assert.equal(unnamed.ok, true);
-    if (unnamed.ok) assert.equal(unnamed.value[0]?.label, "官网");
+    if (unnamed.ok) assert.equal(unnamed.value[0]?.label, EXTRA_DOWNLOAD_DEFAULT_LABEL);
+    assert.equal(androidDownloadChannelsError([], []), ANDROID_DOWNLOAD_REQUIRED_ERROR);
+    assert.equal(androidDownloadChannelsError([ANDROID_STORE], []), null);
+    assert.equal(
+      androidDownloadChannelsError([], [{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "https://example.com" }]),
+      null,
+    );
+    assert.equal(isAndroidListed(["huawei"], []), true);
+    assert.equal(isAndroidListed([], [{ label: EXTRA_DOWNLOAD_DEFAULT_LABEL, url: "https://example.com" }]), false);
+    assert.equal(isAndroidListed([], []), true);
   });
 });
 
@@ -314,7 +350,7 @@ describe("platform payload errors", () => {
       platforms: [{ platform: "android", packageName: "com.company.app", extraDownloads: "https://x.com" }],
     });
     assert.equal(extras.ok, false);
-    if (!extras.ok) assert.equal(extras.error, "额外下载地址无效");
+    if (!extras.ok) assert.equal(extras.error, "官网地址无效");
 
     const tooMany = parsePlatformsPayload({
       platforms: [

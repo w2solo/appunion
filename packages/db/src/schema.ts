@@ -31,6 +31,26 @@ export const developers = pgTable(
   }),
 );
 
+export const inviteCodes = pgTable(
+  "invite_codes",
+  {
+    id: id(),
+    code: text("code").notNull(),
+    note: text("note").notNull().default(""),
+    createdBy: text("created_by")
+      .notNull()
+      .references(() => developers.id),
+    usedBy: text("used_by").references(() => developers.id),
+    createdAt: createdAt(),
+    usedAt: optionalTimestamp("used_at"),
+    revokedAt: optionalTimestamp("revoked_at"),
+  },
+  (t) => ({
+    codeUidx: uniqueIndex("invite_codes_code_uidx").on(t.code),
+    createdByIdx: index("invite_codes_created_by_idx").on(t.createdBy),
+  }),
+);
+
 export const apps = pgTable(
   "apps",
   {
@@ -223,6 +243,7 @@ export const anomalyFlags = pgTable("anomaly_flags", {
 });
 
 export type Developer = typeof developers.$inferSelect;
+export type InviteCode = typeof inviteCodes.$inferSelect;
 export type App = typeof apps.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type AppPlatform = typeof appPlatforms.$inferSelect;

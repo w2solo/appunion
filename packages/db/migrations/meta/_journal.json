@@ -29,6 +29,13 @@
       "when": 1757400000000,
       "tag": "0004_union_description",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1757664000000,
+      "tag": "0005_invite_codes",
+      "breakpoints": true
     }
   ]
 }

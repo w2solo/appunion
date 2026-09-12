@@ -11,7 +11,7 @@ import { AppsPage } from "./pages/apps";
 import { NewAppPage } from "./pages/app-new";
 import { AppDetailPage } from "./pages/app-detail";
 import { AppStatsPage } from "./pages/app-stats";
-import { OpsAdminsPage, OpsAnomaliesPage, OpsAppPage, OpsCategoriesPage, OpsConfigPage, OpsReviewPage } from "./pages/ops";
+import { OpsAdminsPage, OpsAnomaliesPage, OpsAppPage, OpsCategoriesPage, OpsConfigPage, OpsInvitesPage, OpsReviewPage } from "./pages/ops";
 
 if (
   import.meta.env.PROD &&
@@ -87,6 +87,14 @@ createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth admin>
                   <OpsCategoriesPage />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/ops/invites"
+              element={
+                <RequireAuth admin>
+                  <OpsInvitesPage />
                 </RequireAuth>
               }
             />

@@ -9,12 +9,15 @@ import {
   androidDownloadChannelsError,
   buildDownloads,
   isAndroidListed,
+  generateInviteCode,
+  formatInviteCode,
   isSuperAdminEmail,
   isValidCategoryName,
   isValidHttpsUrl,
   isValidPackageName,
   listingCardOf,
   normalizeCategoryName,
+  normalizeInviteCode,
   parseDownloadStores,
   parseExtraDownloads,
 } from "@appunions/shared";
@@ -162,6 +165,23 @@ describe("super admin", () => {
     assert.equal(isSuperAdminEmail("other@example.com", "admin@example.com"), false);
     assert.equal(isSuperAdminEmail("admin@example.com", ""), false);
     assert.equal(isSuperAdminEmail("admin@example.com"), false);
+  });
+});
+
+describe("invite codes", () => {
+  it("generates 8-char codes from the readable alphabet", () => {
+    const code = generateInviteCode();
+    assert.equal(code.length, 8);
+    assert.equal(normalizeInviteCode(code), code);
+    assert.match(formatInviteCode(code), /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+  });
+
+  it("normalizes dashed input and rejects used/ambiguous characters", () => {
+    assert.equal(normalizeInviteCode("ab2c-defg"), "AB2CDEFG");
+    assert.equal(normalizeInviteCode(" AB2C DEFG "), "AB2CDEFG");
+    assert.equal(normalizeInviteCode("AB2C0EFG"), null);
+    assert.equal(normalizeInviteCode("short"), null);
+    assert.equal(formatInviteCode("ab2cdefg"), "AB2C-DEFG");
   });
 });
 

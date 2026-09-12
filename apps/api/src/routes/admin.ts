@@ -1,11 +1,13 @@
 import { Hono } from "hono";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
   anomalyFlags,
   appReviews,
   apps,
   developers,
+  inviteCodes,
   categoryUsage,
   createCategory,
   deleteCategory,
@@ -19,6 +21,7 @@ import {
 } from "@appunions/db";
 import {
   ERROR_CODES,
+  generateInviteCode,
   graphemeLength,
   ICON_MAX_BYTES,
   isSuperAdminEmail,
@@ -32,6 +35,7 @@ import { getDb } from "../db.js";
 import { readJson, routeParam, type AppEnv } from "../context.js";
 import { sendError } from "../errors.js";
 import { mustUser, publicUser, requireAdmin, requireSuperAdmin } from "../lib/session.js";
+import { inviteStatus, isUniqueViolation, presentInviteCode } from "../lib/invites.js";
 import { invalidatePoolCache } from "../kv.js";
 import { uploadIcon } from "../icons.js";
 
@@ -52,6 +56,36 @@ const configPatch = z.object({
 
 function withOpsMeta<T extends object>(c: { env: { SUPER_ADMIN_EMAIL: string } }, row: T) {
   return { ...row, superAdminEmail: c.env.SUPER_ADMIN_EMAIL };
+}
+
+const inviteNoteBody = z.object({
+  note: z.string().max(80).optional(),
+});
+
+const inviteCreators = alias(developers, "invite_creators");
+const inviteConsumers = alias(developers, "invite_consumers");
+
+function presentInvite(row: {
+  id: string;
+  code: string;
+  note: string;
+  createdAt: Date;
+  usedAt: Date | null;
+  revokedAt: Date | null;
+  createdByEmail: string;
+  usedByEmail: string | null;
+}) {
+  return {
+    id: row.id,
+    code: presentInviteCode(row.code),
+    note: row.note,
+    status: inviteStatus(row),
+    createdAt: row.createdAt,
+    usedAt: row.usedAt,
+    revokedAt: row.revokedAt,
+    createdByEmail: row.createdByEmail,
+    usedByEmail: row.usedByEmail,
+  };
 }
 
 export function adminRoutes(app: Hono<AppEnv>) {
@@ -369,6 +403,91 @@ export function adminRoutes(app: Hono<AppEnv>) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "已有应用在用，不能删除");
     }
     return c.json({ ok: true });
+  });
+
+  app.get("/admin/invites", async (c) => {
+    const db = getDb(c.env.DB);
+    const rows = await db
+      .select({
+        id: inviteCodes.id,
+        code: inviteCodes.code,
+        note: inviteCodes.note,
+        createdAt: inviteCodes.createdAt,
+        usedAt: inviteCodes.usedAt,
+        revokedAt: inviteCodes.revokedAt,
+        createdByEmail: inviteCreators.email,
+        usedByEmail: inviteConsumers.email,
+      })
+      .from(inviteCodes)
+      .innerJoin(inviteCreators, eq(inviteCreators.id, inviteCodes.createdBy))
+      .leftJoin(inviteConsumers, eq(inviteConsumers.id, inviteCodes.usedBy))
+      .orderBy(desc(inviteCodes.createdAt))
+      .limit(200);
+    return c.json({ items: rows.map(presentInvite) });
+  });
+
+  app.post("/admin/invites", async (c) => {
+    const parsed = inviteNoteBody.safeParse(await readJson(c));
+    if (!parsed.success) {
+      return sendError(c, 400, ERROR_CODES.invalid_params, "备注最多 80 个字");
+    }
+    const db = getDb(c.env.DB);
+    const actor = mustUser(c);
+    const note = parsed.data.note?.trim() ?? "";
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const code = generateInviteCode();
+      try {
+        const [row] = await db
+          .insert(inviteCodes)
+          .values({
+            code,
+            note,
+            createdBy: actor.id,
+          })
+          .returning();
+        return c.json(
+          presentInvite({
+            ...row!,
+            createdByEmail: actor.email ?? "",
+            usedByEmail: null,
+          }),
+          201,
+        );
+      } catch (err) {
+        if (!isUniqueViolation(err)) throw err;
+      }
+    }
+    return sendError(c, 500, ERROR_CODES.internal_error, "生成邀请码失败，请重试");
+  });
+
+  app.post("/admin/invites/:id/revoke", async (c) => {
+    const db = getDb(c.env.DB);
+    const id = routeParam(c, "id");
+    const [updated] = await db
+      .update(inviteCodes)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(inviteCodes.id, id), isNull(inviteCodes.usedAt), isNull(inviteCodes.revokedAt)))
+      .returning();
+    if (!updated) {
+      const existing = await db.select().from(inviteCodes).where(eq(inviteCodes.id, id)).limit(1);
+      if (!existing[0]) return sendError(c, 404, ERROR_CODES.not_found, "邀请码不存在");
+      if (existing[0].usedAt) {
+        return sendError(c, 400, ERROR_CODES.invalid_params, "邀请码已使用，不能撤销");
+      }
+      return sendError(c, 400, ERROR_CODES.invalid_params, "邀请码已撤销");
+    }
+    const creator = await db
+      .select({ email: developers.email })
+      .from(developers)
+      .where(eq(developers.id, updated.createdBy))
+      .limit(1);
+    return c.json(
+      presentInvite({
+        ...updated,
+        createdByEmail: creator[0]?.email ?? "",
+        usedByEmail: null,
+      }),
+    );
   });
 
   app.get("/admin/users", requireSuperAdmin, async (c) => {

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { ActionStatus, useActionFeedback } from "../shared/action-status";
+import { ActionStatus, copyToClipboard, useActionFeedback } from "../shared/action-status";
 import { api } from "../shared/api";
 import { useAuth } from "../shared/auth";
 import { platformLabel, statusLabel } from "../shared/status";
@@ -531,6 +531,158 @@ export function OpsAdminsPage() {
                     >
                       设为管理员
                     </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+type InviteItem = {
+  id: string;
+  code: string;
+  note: string;
+  status: "unused" | "used" | "revoked";
+  createdAt: string;
+  usedAt: string | null;
+  revokedAt: string | null;
+  createdByEmail: string;
+  usedByEmail: string | null;
+};
+
+const INVITE_STATUS_LABEL = {
+  unused: "未使用",
+  used: "已使用",
+  revoked: "已撤销",
+};
+
+export function OpsInvitesPage() {
+  const [items, setItems] = useState<InviteItem[]>([]);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function load() {
+    const data = await api<{ items: InviteItem[] }>("/admin/invites");
+    setItems(data.items);
+  }
+
+  useEffect(() => {
+    void load().catch((e: Error) => setError(e.message));
+  }, []);
+
+  async function generate(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const created = await api<InviteItem>("/admin/invites", {
+        method: "POST",
+        body: JSON.stringify({ note: note.trim() }),
+      });
+      setItems((prev) => [created, ...prev]);
+      setNote("");
+      await copyToClipboard(created.code);
+      setMessage(`已生成 ${created.code}，并复制到剪贴板`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "生成失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copyCode(code: string) {
+    setError("");
+    try {
+      await copyToClipboard(code);
+      setMessage(`已复制 ${code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "复制失败");
+    }
+  }
+
+  async function revoke(item: InviteItem) {
+    if (!confirm(`确定撤销邀请码 ${item.code}？`)) return;
+    setBusyId(item.id);
+    setError("");
+    setMessage("");
+    try {
+      const updated = await api<InviteItem>(`/admin/invites/${item.id}/revoke`, { method: "POST" });
+      setItems((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setMessage(`已撤销 ${item.code}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "撤销失败");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="max-w-3xl space-y-4">
+      <h1 className="text-2xl font-semibold">邀请码</h1>
+      <p className="text-sm text-muted">
+        每个邀请码只能注册一个新用户。已有账号登录不需要邀请码。生成后请发给受邀开发者。
+      </p>
+      <form className="flex gap-2" onSubmit={(e) => void generate(e)}>
+        <input
+          className="flex-1 rounded border border-line px-3 py-2 text-sm"
+          maxLength={80}
+          placeholder="备注（可选，例如发给谁）"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+        <button className="rounded bg-brand px-4 py-2 text-sm text-white disabled:opacity-50" disabled={busy} type="submit">
+          {busy ? "生成中…" : "生成邀请码"}
+        </button>
+      </form>
+      <ActionStatus error={error} message={message} />
+      {items.length === 0 ? (
+        <p className="text-muted">还没有邀请码</p>
+      ) : (
+        <table className="w-full rounded-lg bg-white text-left text-sm shadow-sm">
+          <thead className="text-muted">
+            <tr>
+              <th className="px-4 py-3">邀请码</th>
+              <th className="px-4 py-3">备注</th>
+              <th className="px-4 py-3">状态</th>
+              <th className="px-4 py-3">创建者</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => (
+              <tr key={item.id} className="border-t border-line">
+                <td className="px-4 py-3 font-mono">{item.code}</td>
+                <td className="px-4 py-3 text-muted">{item.note || "—"}</td>
+                <td className="px-4 py-3">
+                  {INVITE_STATUS_LABEL[item.status]}
+                  {item.status === "used" && item.usedByEmail ? ` · ${item.usedByEmail}` : ""}
+                </td>
+                <td className="px-4 py-3 text-muted">{item.createdByEmail}</td>
+                <td className="px-4 py-3 text-right">
+                  {item.status === "unused" ? (
+                    <span className="flex justify-end gap-3">
+                      <button className="text-brand" onClick={() => void copyCode(item.code)} type="button">
+                        复制
+                      </button>
+                      <button
+                        className="text-red-700 disabled:text-muted"
+                        disabled={busyId === item.id}
+                        onClick={() => void revoke(item)}
+                        type="button"
+                      >
+                        撤销
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="text-muted">—</span>
                   )}
                 </td>
               </tr>

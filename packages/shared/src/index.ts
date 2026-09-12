@@ -62,7 +62,37 @@ export const ERROR_CODES = {
   rate_limited: "rate_limited",
   internal_error: "internal_error",
   not_found: "not_found",
+  invite_required: "invite_required",
+  invite_invalid: "invite_invalid",
 } as const;
+
+export const INVITE_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+export const INVITE_CODE_LENGTH = 8;
+
+export function generateInviteCode(): string {
+  const bytes = new Uint8Array(INVITE_CODE_LENGTH);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (const byte of bytes) {
+    out += INVITE_CODE_ALPHABET[byte & 31];
+  }
+  return out;
+}
+
+export function normalizeInviteCode(value: string): string | null {
+  const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (compact.length !== INVITE_CODE_LENGTH) return null;
+  for (const ch of compact) {
+    if (!INVITE_CODE_ALPHABET.includes(ch)) return null;
+  }
+  return compact;
+}
+
+export function formatInviteCode(code: string): string {
+  const normalized = normalizeInviteCode(code) ?? code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (normalized.length !== INVITE_CODE_LENGTH) return code.trim();
+  return `${normalized.slice(0, 4)}-${normalized.slice(4)}`;
+}
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 

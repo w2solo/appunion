@@ -9,13 +9,21 @@ import { sendError } from "../errors.js";
 import { clearAuthCookies, mustUser, publicUser, requireUser, setAuthCookies } from "../lib/session.js";
 import { sendLoginCode } from "../lib/mail.js";
 import { consumeOtp, randomOtp, saveOtp } from "../lib/otp.js";
+import { consumeInvite, findActiveInvite } from "../lib/invites.js";
 import { rateLimit } from "../kv.js";
 
-const emailBody = z.object({ email: z.string().email() });
+const emailBody = z.object({
+  email: z.string().email(),
+  inviteCode: z.string().optional(),
+});
 const verifyBody = z.object({
   email: z.string().email(),
   code: z.string().regex(/^\d{6}$/),
+  inviteCode: z.string().optional(),
 });
+
+const INVITE_REQUIRED_MESSAGE = "该邮箱尚未注册。本站为邀请制，请向管理员获取邀请码后再注册。";
+const INVITE_INVALID_MESSAGE = "邀请码无效或已被使用";
 
 export function dashboardAuthRoutes(app: Hono<AppEnv>) {
   app.post("/dashboard/auth/send-code", async (c) => {
@@ -24,6 +32,17 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "请填写有效邮箱");
     }
     const email = parsed.data.email.toLowerCase();
+    const db = getDb(c.env.DB);
+    const existing = await db.select({ id: developers.id }).from(developers).where(eq(developers.email, email)).limit(1);
+    if (!existing[0] && !isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL)) {
+      if (!parsed.data.inviteCode?.trim()) {
+        return sendError(c, 403, ERROR_CODES.invite_required, INVITE_REQUIRED_MESSAGE);
+      }
+      const invite = await findActiveInvite(db, parsed.data.inviteCode);
+      if (!invite) {
+        return sendError(c, 400, ERROR_CODES.invite_invalid, INVITE_INVALID_MESSAGE);
+      }
+    }
     if (!(await rateLimit(c.env.KV, `sendcode:ip:${clientIp(c)}`, 10, 3600))) {
       return sendError(c, 429, ERROR_CODES.rate_limited, "发送太频繁，请稍后再试");
     }
@@ -58,24 +77,57 @@ export function dashboardAuthRoutes(app: Hono<AppEnv>) {
     if (!parsed.success) {
       return sendError(c, 400, ERROR_CODES.invalid_params, "请输入 6 位验证码");
     }
+    const db = getDb(c.env.DB);
+    let rows = await db.select().from(developers).where(eq(developers.email, email)).limit(1);
+    let user = rows[0];
+    const superAdmin = isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL);
+    let invite = null;
+    if (!user && !superAdmin) {
+      if (!parsed.data.inviteCode?.trim()) {
+        return sendError(c, 403, ERROR_CODES.invite_required, INVITE_REQUIRED_MESSAGE);
+      }
+      invite = await findActiveInvite(db, parsed.data.inviteCode);
+      if (!invite) {
+        return sendError(c, 400, ERROR_CODES.invite_invalid, INVITE_INVALID_MESSAGE);
+      }
+    }
     const ok = await consumeOtp(c.env.KV, c.env.JWT_SECRET, email, parsed.data.code);
     if (!ok) {
       return sendError(c, 401, ERROR_CODES.unauthorized, "验证码不对或已过期");
     }
-    const db = getDb(c.env.DB);
-    let rows = await db.select().from(developers).where(eq(developers.email, email)).limit(1);
-    let user = rows[0];
     if (!user) {
-      const inserted = await db
-        .insert(developers)
-        .values({
-          email,
-          passwordHash: "otp",
-          role: isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL) ? "admin" : "developer",
-        })
-        .returning();
-      user = inserted[0]!;
-    } else if (isSuperAdminEmail(email, c.env.SUPER_ADMIN_EMAIL) && user.role !== "admin") {
+      if (superAdmin) {
+        const inserted = await db
+          .insert(developers)
+          .values({
+            email,
+            passwordHash: "otp",
+            role: "admin",
+          })
+          .returning();
+        user = inserted[0]!;
+      } else {
+        try {
+          user = await db.transaction(async (tx) => {
+            const [inserted] = await tx
+              .insert(developers)
+              .values({
+                email,
+                passwordHash: "otp",
+                role: "developer",
+              })
+              .returning();
+            const consumed = await consumeInvite(tx, invite!, inserted!.id);
+            if (!consumed) {
+              throw new Error("invite_taken");
+            }
+            return inserted!;
+          });
+        } catch {
+          return sendError(c, 400, ERROR_CODES.invite_invalid, INVITE_INVALID_MESSAGE);
+        }
+      }
+    } else if (superAdmin && user.role !== "admin") {
       const [updated] = await db
         .update(developers)
         .set({ role: "admin" })
